@@ -202,3 +202,40 @@ def test_integration_warns_on_missing_asset(ckl_module, tmp_path, capsys):
     f.write_text(no_asset, encoding="utf-8")
     _run_main(ckl_module, f)
     assert "[WARNING]" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Write failure → exit code 1
+# ---------------------------------------------------------------------------
+
+def test_integration_write_failure_returns_one(ckl_module, tmp_path, capsys):
+    f = tmp_path / "checklist.ckl"
+    f.write_text(_SAMPLE_CKL, encoding="utf-8")
+    # Patch write_file to simulate a JSON write failure.
+    original = ckl_module.write_file
+    call_count = {"n": 0}
+
+    def failing_write(path, content, label):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return False
+        return original(path, content, label)
+
+    with patch("sys.argv", ["ckl_convert", str(f)]), \
+         patch("os.geteuid", return_value=1000), \
+         patch.object(ckl_module, "write_file", side_effect=failing_write):
+        result = ckl_module.main()
+
+    assert result == 1
+
+
+def test_integration_write_failure_prints_error_to_stderr(ckl_module, tmp_path, capsys):
+    f = tmp_path / "checklist.ckl"
+    f.write_text(_SAMPLE_CKL, encoding="utf-8")
+
+    with patch("sys.argv", ["ckl_convert", str(f)]), \
+         patch("os.geteuid", return_value=1000), \
+         patch.object(ckl_module, "write_file", return_value=False):
+        ckl_module.main()
+
+    assert "[ERROR]" in capsys.readouterr().err

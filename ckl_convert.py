@@ -27,35 +27,6 @@ from pathlib import Path
 
 VALID_EXTENSIONS = {".ckl", ".chk"}
 
-# STIG_DATA keys commonly found inside <VULN> blocks
-STIG_DATA_KEYS = [
-    "Vuln_Num",
-    "Severity",
-    "Group_Title",
-    "Rule_ID",
-    "Rule_Ver",
-    "Rule_Title",
-    "Vuln_Discuss",
-    "IA_Controls",
-    "Check_Content",
-    "Fix_Text",
-    "False_Positives",
-    "False_Negatives",
-    "Documentable",
-    "Mitigations",
-    "Potential_Impact",
-    "Third_Party_Tools",
-    "Mitigation_Control",
-    "Responsibility",
-    "Security_Override_Guidance",
-    "Check_Content_Ref",
-    "Class",
-    "STIGRef",
-    "TargetKey",
-    "STIG_UUID",
-    "CCI_REF",
-]
-
 
 # ---------------------------------------------------------------------------
 # Root guard
@@ -421,17 +392,20 @@ def build_markdown(data: dict) -> str:
 # File writing helpers
 # ---------------------------------------------------------------------------
 
-def write_file(path: Path, content: str, label: str) -> None:
-    """Write content to path with error handling."""
+def write_file(path: Path, content: str, label: str) -> bool:
+    """Write content to path with error handling. Returns True on success."""
     try:
         path.write_text(content, encoding="utf-8")
         print(f"[OK] {label} written → {path}")
+        return True
     except PermissionError as exc:
         print(f"[ERROR] Permission denied writing {label} to '{path}': {exc}",
               file=sys.stderr)
+        return False
     except IOError as exc:
         print(f"[ERROR] I/O error writing {label} to '{path}': {exc}",
               file=sys.stderr)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -515,18 +489,22 @@ def main() -> int:
         print(f"[ERROR] Failed to serialise data to JSON: {exc}", file=sys.stderr)
         return 1
 
-    write_file(json_path, json_content, "JSON")
+    ok_json = write_file(json_path, json_content, "JSON")
 
     # --- TOML ----------------------------------------------------------------
     toml_content = build_toml(data)
-    write_file(toml_path, toml_content, "TOML")
+    ok_toml = write_file(toml_path, toml_content, "TOML")
 
     # --- Markdown ------------------------------------------------------------
     md_content = build_markdown(data)
-    write_file(md_path, md_content, "Markdown")
+    ok_md = write_file(md_path, md_content, "Markdown")
 
-    print("[INFO] Conversion complete.")
-    return 0
+    if ok_json and ok_toml and ok_md:
+        print("[INFO] Conversion complete.")
+        return 0
+
+    print("[ERROR] One or more output files could not be written.", file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
