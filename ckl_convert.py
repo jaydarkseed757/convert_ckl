@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -189,6 +190,9 @@ def _toml_escape_string(value: str) -> str:
     value = value.replace("\n", "\\n")
     value = value.replace("\r", "\\r")
     value = value.replace("\t", "\\t")
+    # Remaining C0 control chars and DEL have no named TOML escape; use \uXXXX.
+    value = re.sub(r"[\x00-\x07\x0b\x0e-\x1f\x7f]",
+                   lambda m: f"\\u{ord(m.group()):04X}", value)
     return value
 
 

@@ -92,6 +92,42 @@ def test_toml_escape_mixed_control_chars(ckl_module):
     assert result == "a\\tb\\nc"
 
 
+def test_toml_escape_nul_becomes_unicode_escape(ckl_module):
+    assert ckl_module._toml_escape_string("\x00") == "\\u0000"
+
+
+def test_toml_escape_bel_becomes_unicode_escape(ckl_module):
+    assert ckl_module._toml_escape_string("\x07") == "\\u0007"
+
+
+def test_toml_escape_vertical_tab_becomes_unicode_escape(ckl_module):
+    # \x0b (vertical tab) has no named TOML escape
+    assert ckl_module._toml_escape_string("\x0b") == "\\u000B"
+
+
+def test_toml_escape_unit_separator_becomes_unicode_escape(ckl_module):
+    assert ckl_module._toml_escape_string("\x1f") == "\\u001F"
+
+
+def test_toml_escape_del_becomes_unicode_escape(ckl_module):
+    assert ckl_module._toml_escape_string("\x7f") == "\\u007F"
+
+
+def test_toml_escape_named_escapes_not_affected_by_unicode_fallback(ckl_module):
+    # \b \f \n \r \t must still use their named forms, not \uXXXX
+    assert ckl_module._toml_escape_string("\b") == "\\b"
+    assert ckl_module._toml_escape_string("\f") == "\\f"
+    assert ckl_module._toml_escape_string("\n") == "\\n"
+    assert ckl_module._toml_escape_string("\r") == "\\r"
+    assert ckl_module._toml_escape_string("\t") == "\\t"
+
+
+def test_toml_escape_mixed_named_and_unicode(ckl_module):
+    # NUL + tab + newline in one string
+    result = ckl_module._toml_escape_string("\x00\t\n")
+    assert result == "\\u0000\\t\\n"
+
+
 # ---------------------------------------------------------------------------
 # _toml_kv
 # ---------------------------------------------------------------------------
