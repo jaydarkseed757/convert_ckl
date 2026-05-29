@@ -5,30 +5,6 @@ import pytest
 from pathlib import Path
 
 
-_MINIMAL_CKL = """\
-<CHECKLIST>
-  <ASSET><HOST_NAME>box1</HOST_NAME></ASSET>
-  <VULN>
-    <STIG_DATA>
-      <VULN_ATTRIBUTE>Vuln_Num</VULN_ATTRIBUTE>
-      <ATTRIBUTE_DATA>V-1</ATTRIBUTE_DATA>
-    </STIG_DATA>
-    <STATUS>Open</STATUS>
-    <FINDING_DETAILS></FINDING_DETAILS>
-    <COMMENTS></COMMENTS>
-    <SEVERITY_OVERRIDE></SEVERITY_OVERRIDE>
-    <SEVERITY_JUSTIFICATION></SEVERITY_JUSTIFICATION>
-  </VULN>
-</CHECKLIST>
-"""
-
-
-def _write_ckl(tmp_path: Path, content: str = _MINIMAL_CKL, name: str = "sample.ckl") -> Path:
-    f = tmp_path / name
-    f.write_text(content, encoding="utf-8")
-    return f
-
-
 # ---------------------------------------------------------------------------
 # parse_asset
 # ---------------------------------------------------------------------------
@@ -222,53 +198,50 @@ def test_parse_vulnerabilities_multiple_vulns(ckl_module):
 # parse_ckl
 # ---------------------------------------------------------------------------
 
-def test_parse_ckl_returns_expected_keys(ckl_module, tmp_path):
-    f = _write_ckl(tmp_path)
-    result = ckl_module.parse_ckl(f)
+def test_parse_ckl_returns_expected_keys(ckl_module, fixtures_dir):
+    result = ckl_module.parse_ckl(fixtures_dir / "minimal.ckl")
     assert isinstance(result, dict)
     assert set(result.keys()) == {"source_file", "converted_at", "asset", "vulnerabilities"}
 
 
-def test_parse_ckl_source_file_is_filename_only(ckl_module, tmp_path):
-    f = _write_ckl(tmp_path)
-    result = ckl_module.parse_ckl(f)
-    assert result["source_file"] == "sample.ckl"
+def test_parse_ckl_source_file_is_filename_only(ckl_module, fixtures_dir):
+    result = ckl_module.parse_ckl(fixtures_dir / "minimal.ckl")
+    assert result["source_file"] == "minimal.ckl"
     assert "/" not in result["source_file"]
 
 
-def test_parse_ckl_converted_at_is_iso8601_utc(ckl_module, tmp_path):
-    f = _write_ckl(tmp_path)
-    result = ckl_module.parse_ckl(f)
+def test_parse_ckl_converted_at_is_iso8601_utc(ckl_module, fixtures_dir):
+    result = ckl_module.parse_ckl(fixtures_dir / "minimal.ckl")
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", result["converted_at"])
 
 
-def test_parse_ckl_asset_is_dict(ckl_module, tmp_path):
-    f = _write_ckl(tmp_path)
-    result = ckl_module.parse_ckl(f)
+def test_parse_ckl_asset_is_dict(ckl_module, fixtures_dir):
+    result = ckl_module.parse_ckl(fixtures_dir / "minimal.ckl")
     assert isinstance(result["asset"], dict)
-    assert result["asset"]["HOST_NAME"] == "box1"
+    assert result["asset"]["HOST_NAME"] == "minimal-host"
 
 
-def test_parse_ckl_vulnerabilities_is_list(ckl_module, tmp_path):
-    f = _write_ckl(tmp_path)
-    result = ckl_module.parse_ckl(f)
+def test_parse_ckl_vulnerabilities_is_list(ckl_module, fixtures_dir):
+    result = ckl_module.parse_ckl(fixtures_dir / "minimal.ckl")
     assert isinstance(result["vulnerabilities"], list)
     assert len(result["vulnerabilities"]) == 1
 
 
-def test_parse_ckl_invalid_xml_exits(ckl_module, tmp_path):
-    f = tmp_path / "bad.ckl"
-    f.write_text("<<not xml>>", encoding="utf-8")
+def test_parse_ckl_valid_fixture_has_repeated_cci_ref(ckl_module, fixtures_dir):
+    result = ckl_module.parse_ckl(fixtures_dir / "valid.ckl")
+    v0 = result["vulnerabilities"][0]
+    assert v0["stig_data"]["CCI_REF"] == ["CCI-000366", "CCI-001199"]
+
+
+def test_parse_ckl_invalid_xml_exits(ckl_module, fixtures_dir):
     with pytest.raises(SystemExit) as exc_info:
-        ckl_module.parse_ckl(f)
+        ckl_module.parse_ckl(fixtures_dir / "malformed.ckl")
     assert exc_info.value.code == 1
 
 
-def test_parse_ckl_invalid_xml_stderr(ckl_module, tmp_path, capsys):
-    f = tmp_path / "bad.ckl"
-    f.write_text("<<not xml>>", encoding="utf-8")
+def test_parse_ckl_invalid_xml_stderr(ckl_module, fixtures_dir, capsys):
     try:
-        ckl_module.parse_ckl(f)
+        ckl_module.parse_ckl(fixtures_dir / "malformed.ckl")
     except SystemExit:
         pass
     captured = capsys.readouterr()

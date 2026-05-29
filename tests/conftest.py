@@ -14,3 +14,9 @@ def ckl_module():
     sys.modules["ckl_convert"] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+@pytest.fixture(scope="session")
+def fixtures_dir():
+    """Path to tests/fixtures/."""
+    return pathlib.Path(__file__).parent / "fixtures"
