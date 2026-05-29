@@ -12,6 +12,9 @@ external dependencies — stdlib only.
 - No third-party packages — uses only `argparse`, `json`, `os`, `sys`,
   `xml.etree.ElementTree`, `datetime`, and `pathlib`
 
+> **Testing only:** `pytest` is the sole external dependency and is only
+> needed to run the test suite. It is not required to use `ckl_convert.py`.
+
 ---
 
 ## Usage
