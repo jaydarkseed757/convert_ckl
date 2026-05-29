@@ -164,6 +164,44 @@ def test_toml_kv_single_item_list(ckl_module):
 
 
 # ---------------------------------------------------------------------------
+# _toml_kv — key quoting (M1)
+# ---------------------------------------------------------------------------
+
+def test_toml_kv_bare_key_unquoted(ckl_module):
+    # All-safe chars: letters, digits, underscore, hyphen — no quotes needed.
+    assert ckl_module._toml_kv("HOST_NAME", "x").startswith("HOST_NAME =")
+
+
+def test_toml_kv_key_with_dot_is_quoted(ckl_module):
+    # A dot would be misread as dotted-key syntax if left bare.
+    result = ckl_module._toml_kv("some.key", "val")
+    assert result.startswith('"some.key"')
+
+
+def test_toml_kv_key_with_space_is_quoted(ckl_module):
+    result = ckl_module._toml_kv("my key", "val")
+    assert result.startswith('"my key"')
+
+
+def test_toml_kv_key_with_special_chars_quoted_and_escaped(ckl_module):
+    # A key containing a double-quote must be escaped inside the quoted key.
+    result = ckl_module._toml_kv('bad"key', "val")
+    assert result.startswith('"bad\\"key"')
+
+
+def test_toml_kv_hyphen_and_digits_are_bare(ckl_module):
+    # Hyphens and digits are valid bare-key characters.
+    result = ckl_module._toml_kv("rule-42", "x")
+    assert result.startswith("rule-42 =")
+
+
+def test_toml_kv_quoted_key_value_still_correct(ckl_module):
+    # Value must be unaffected when the key gets quoted.
+    result = ckl_module._toml_kv("odd.key", "myvalue")
+    assert result == '"odd.key" = "myvalue"'
+
+
+# ---------------------------------------------------------------------------
 # build_toml — header and top-level fields
 # ---------------------------------------------------------------------------
 

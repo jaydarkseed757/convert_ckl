@@ -203,11 +203,15 @@ def _toml_kv(key: str, value) -> str:
     A string value is emitted as a quoted basic string; a list value is
     emitted as a TOML array of quoted strings (this is how repeated
     STIG_DATA attributes such as CCI_REF are represented).
+
+    Keys that are not valid TOML bare keys (A-Z a-z 0-9 - _) are quoted
+    so that dots or other characters are not misread as dotted-key syntax.
     """
+    safe_key = key if re.fullmatch(r"[A-Za-z0-9_-]+", key) else f'"{_toml_escape_string(key)}"'
     if isinstance(value, list):
         items = ", ".join(f'"{_toml_escape_string(str(v))}"' for v in value)
-        return f"{key} = [{items}]"
-    return f'{key} = "{_toml_escape_string(str(value))}"'
+        return f"{safe_key} = [{items}]"
+    return f'{safe_key} = "{_toml_escape_string(str(value))}"'
 
 
 def build_toml(data: dict) -> str:
