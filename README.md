@@ -205,6 +205,41 @@ Recognised `stig_data` keys include (but are not limited to): `Vuln_Num`,
 
 ---
 
+## Testing
+
+The test suite uses [pytest](https://pytest.org) and covers all critical paths
+with 57 tests across four files.
+
+### Install pytest
+
+```bash
+pip install pytest
+```
+
+### Run the tests
+
+```bash
+# All tests
+python3 -m pytest tests/ -v
+
+# Individual test files
+python3 -m pytest tests/test_validation.py -v   # validate_input()
+python3 -m pytest tests/test_parsing.py -v      # parse_asset(), parse_vulnerabilities(), parse_ckl()
+python3 -m pytest tests/test_root_guard.py -v   # check_root()
+python3 -m pytest tests/test_integration.py -v  # full pipeline via main()
+```
+
+### Coverage areas
+
+| Test file | Function(s) covered | Tests |
+|---|---|---|
+| `test_root_guard.py` | `check_root()` | 8 |
+| `test_validation.py` | `validate_input()` | 14 |
+| `test_parsing.py` | `parse_asset()`, `parse_vulnerabilities()`, `parse_ckl()` | 21 |
+| `test_integration.py` | `main()` end-to-end pipeline | 14 |
+
+---
+
 ## Hardened Environment Notes
 
 - No `pip install` required — drop the single script file onto the target host.
