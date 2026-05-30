@@ -20,7 +20,7 @@ external dependencies — stdlib only.
 ## Usage
 
 ```bash
-python3 ckl_convert.py INPUT_FILE [--run-as-root]
+python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report]
 ```
 
 ### Arguments
@@ -29,12 +29,16 @@ python3 ckl_convert.py INPUT_FILE [--run-as-root]
 |---|---|---|
 | `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
 | `--run-as-root` | flag | Bypass the root-execution block (see [Security](#security)) |
+| `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats |
 
 ### Examples
 
 ```bash
 # Standard usage
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl
+
+# Also emit a stats summary
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --report
 
 # Override root block — document your reason in change control
 sudo python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --run-as-root
@@ -50,6 +54,12 @@ U_RHEL_8_STIG.ckl   ← input
 U_RHEL_8_STIG.json  ← fully nested, indented JSON
 U_RHEL_8_STIG.toml  ← [asset] table + [[vulnerabilities]] array of tables
 U_RHEL_8_STIG.md    ← asset list + summary table + detailed findings
+```
+
+With `--report`, an additional plain-text summary is written alongside them:
+
+```
+report_U_RHEL_8_STIG.txt  ← header + Status / Severity breakdown (counts + %)
 ```
 
 ---

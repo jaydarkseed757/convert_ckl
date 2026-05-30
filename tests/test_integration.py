@@ -199,3 +199,51 @@ def test_integration_write_failure_prints_error_to_stderr(ckl_module, tmp_path, 
         ckl_module.main()
 
     assert "[ERROR]" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --report flag (opt-in)
+# ---------------------------------------------------------------------------
+
+def test_integration_report_flag_creates_report_file(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, f, ["--report"])
+    assert result == 0
+    assert (tmp_path / "report_valid.txt").exists()
+
+
+def test_integration_report_not_created_without_flag(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f)
+    assert not (tmp_path / "report_valid.txt").exists()
+
+
+def test_integration_report_contains_breakdown_sections(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--report"])
+    content = (tmp_path / "report_valid.txt").read_text(encoding="utf-8")
+    assert "Status Breakdown" in content
+    assert "Severity Breakdown" in content
+
+
+def test_integration_report_counts_match_fixture(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--report"])
+    content = (tmp_path / "report_valid.txt").read_text(encoding="utf-8")
+    # valid.ckl: 3 findings; 1 each high/medium/low; NotAFinding/Open/Not Applicable
+    assert "Total findings : 3" in content
+    assert "CAT I (high)" in content
+    assert "CAT II (medium)" in content
+    assert "CAT III (low)" in content
+    assert "NotAFinding" in content
+    assert "Open" in content
+    assert "Not Applicable" in content
+
+
+def test_integration_default_outputs_still_written_with_report(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--report"])
+    # Additive: JSON/TOML/MD must still be produced.
+    assert (tmp_path / "valid.json").exists()
+    assert (tmp_path / "valid.toml").exists()
+    assert (tmp_path / "valid.md").exists()
