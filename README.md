@@ -253,6 +253,24 @@ python3 -m pytest tests/test_integration.py -v  # full pipeline via main()
 
 ---
 
+## RHEL Compatibility
+
+The script is a single stdlib-only file with no compiled extensions or
+third-party packages, so it runs unmodified across the full RHEL lifecycle:
+
+| RHEL Release | System Python | Status |
+|---|---|---|
+| RHEL 8 | 3.6 | ✅ Supported (original target) |
+| RHEL 9 | 3.9 | ✅ Supported — no changes required |
+| RHEL 10 | 3.12 | ✅ Supported — no changes required |
+
+All stdlib modules used (`argparse`, `json`, `os`, `re`, `sys`,
+`xml.etree.ElementTree`, `datetime`, `pathlib`) are present in every version
+above. No version-gated syntax is used. The `datetime.now(timezone.utc)` form
+is used throughout, so there are no deprecation warnings on Python 3.12.
+
+---
+
 ## Hardened Environment Notes
 
 - No `pip install` required — drop the single script file onto the target host.
