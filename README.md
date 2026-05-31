@@ -20,7 +20,8 @@ external dependencies — stdlib only.
 ## Usage
 
 ```bash
-python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report]
+python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report] [--prompt]
+                       [--chunk N] [--quiet] [--output-dir DIR]
 ```
 
 ### Arguments
@@ -30,6 +31,10 @@ python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report]
 | `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
 | `--run-as-root` | flag | Bypass the root-execution block (see [Security](#security)) |
 | `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats |
+| `--prompt` | flag | Also write a `prompt_<name>.md` with a genAI system prompt prepended to the Markdown, ready to paste into a chatbot |
+| `--chunk N` | integer | Also split the Markdown into files of N findings each (`<name>_chunk_001.md`, …) — useful for large STIGs that exceed an LLM's context window |
+| `--quiet` | flag | Suppress `[INFO]` and `[WARNING]` messages; `[ERROR]` messages are always shown |
+| `--output-dir DIR` | path | Write all output files to `DIR` instead of alongside the input (directory is created automatically if it does not exist) |
 
 ### Examples
 
@@ -40,14 +45,22 @@ python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl
 # Also emit a stats summary
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --report
 
+# Generate a paste-ready genAI prompt file
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --prompt
+
+# Split a large STIG into 20-finding chunks for LLM context limits
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --chunk 20
+
+# Write all output to a specific directory, suppress informational output
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --output-dir /tmp/stig_out --quiet
+
 # Override root block — document your reason in change control
 sudo python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --run-as-root
 ```
 
 ### Output
 
-Three files are written to the **same directory as the input**, sharing its
-base name:
+By default, files are written to the **same directory as the input** (override with `--output-dir`):
 
 ```
 U_RHEL_8_STIG.ckl   ← input
@@ -56,10 +69,13 @@ U_RHEL_8_STIG.toml  ← [asset] table + [[vulnerabilities]] array of tables
 U_RHEL_8_STIG.md    ← asset list + summary table + detailed findings
 ```
 
-With `--report`, an additional plain-text summary is written alongside them:
+Optional outputs (each flag is additive — the three core files are always written):
 
 ```
-report_U_RHEL_8_STIG.txt  ← header + Status / Severity breakdown (counts + %)
+report_U_RHEL_8_STIG.txt      ← --report   : Status / Severity breakdown (counts + %)
+prompt_U_RHEL_8_STIG.md       ← --prompt   : genAI system prompt + full Markdown
+U_RHEL_8_STIG_chunk_001.md    ← --chunk N  : findings 1–N
+U_RHEL_8_STIG_chunk_002.md                   findings N+1–2N  … etc.
 ```
 
 ---

@@ -247,3 +247,174 @@ def test_integration_default_outputs_still_written_with_report(ckl_module, tmp_p
     assert (tmp_path / "valid.json").exists()
     assert (tmp_path / "valid.toml").exists()
     assert (tmp_path / "valid.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# --prompt flag
+# ---------------------------------------------------------------------------
+
+def test_integration_prompt_flag_creates_prompt_file(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, f, ["--prompt"])
+    assert result == 0
+    assert (tmp_path / "prompt_valid.md").exists()
+
+
+def test_integration_prompt_not_created_without_flag(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f)
+    assert not (tmp_path / "prompt_valid.md").exists()
+
+
+def test_integration_prompt_contains_system_prompt(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "STIG compliance analyst" in content
+
+
+def test_integration_prompt_contains_markdown_output(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "rhel8-node01" in content
+
+
+def test_integration_prompt_default_outputs_still_written(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt"])
+    assert (tmp_path / "valid.json").exists()
+    assert (tmp_path / "valid.toml").exists()
+    assert (tmp_path / "valid.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# --chunk flag
+# ---------------------------------------------------------------------------
+
+def test_integration_chunk_creates_chunk_files(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    # valid.ckl has 3 vulns; --chunk 2 → chunks 001 (2 vulns) and 002 (1 vuln)
+    result = _run_main(ckl_module, f, ["--chunk", "2"])
+    assert result == 0
+    assert (tmp_path / "valid_chunk_001.md").exists()
+    assert (tmp_path / "valid_chunk_002.md").exists()
+
+
+def test_integration_chunk_correct_count(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--chunk", "2"])
+    chunks = sorted(tmp_path.glob("valid_chunk_*.md"))
+    assert len(chunks) == 2
+
+
+def test_integration_chunk_larger_than_total_gives_one_file(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--chunk", "10"])
+    chunks = sorted(tmp_path.glob("valid_chunk_*.md"))
+    assert len(chunks) == 1
+
+
+def test_integration_chunk_files_contain_asset_info(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--chunk", "2"])
+    for chunk in sorted(tmp_path.glob("valid_chunk_*.md")):
+        assert "rhel8-node01" in chunk.read_text(encoding="utf-8")
+
+
+def test_integration_chunk_files_cover_all_vulns(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--chunk", "2"])
+    combined = "".join(
+        p.read_text(encoding="utf-8") for p in sorted(tmp_path.glob("valid_chunk_*.md"))
+    )
+    assert "V-230221" in combined
+    assert "V-230222" in combined
+    assert "V-230223" in combined
+
+
+def test_integration_chunk_regular_md_still_written(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--chunk", "2"])
+    assert (tmp_path / "valid.md").exists()
+
+
+def test_integration_chunk_zero_returns_one(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, f, ["--chunk", "0"])
+    assert result == 1
+
+
+# ---------------------------------------------------------------------------
+# --quiet flag
+# ---------------------------------------------------------------------------
+
+def test_integration_quiet_suppresses_warning(ckl_module, tmp_path, capsys):
+    no_vulns = "<CHECKLIST><ASSET><HOST_NAME>box</HOST_NAME></ASSET></CHECKLIST>"
+    f = tmp_path / "empty_vulns.ckl"
+    f.write_text(no_vulns, encoding="utf-8")
+    _run_main(ckl_module, f, ["--quiet"])
+    assert capsys.readouterr().err == ""
+
+
+def test_integration_no_quiet_still_shows_warning(ckl_module, tmp_path, capsys):
+    no_vulns = "<CHECKLIST><ASSET><HOST_NAME>box</HOST_NAME></ASSET></CHECKLIST>"
+    f = tmp_path / "empty_vulns.ckl"
+    f.write_text(no_vulns, encoding="utf-8")
+    _run_main(ckl_module, f)
+    assert "[WARNING]" in capsys.readouterr().err
+
+
+def test_integration_quiet_still_shows_error(ckl_module, tmp_path, capsys):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    from unittest.mock import patch
+    with patch("sys.argv", ["ckl_convert", str(f), "--quiet"]), \
+         patch("os.geteuid", return_value=1000), \
+         patch.object(ckl_module, "write_file", return_value=False):
+        ckl_module.main()
+    assert "[ERROR]" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --output-dir flag
+# ---------------------------------------------------------------------------
+
+def test_integration_output_dir_writes_files_there(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    out = tmp_path / "out"
+    result = _run_main(ckl_module, f, ["--output-dir", str(out)])
+    assert result == 0
+    assert (out / "valid.json").exists()
+    assert (out / "valid.toml").exists()
+    assert (out / "valid.md").exists()
+
+
+def test_integration_output_dir_created_if_missing(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    out = tmp_path / "new" / "nested" / "dir"
+    assert not out.exists()
+    _run_main(ckl_module, f, ["--output-dir", str(out)])
+    assert out.exists()
+
+
+def test_integration_output_dir_not_alongside_input(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    out = tmp_path / "out"
+    _run_main(ckl_module, f, ["--output-dir", str(out)])
+    # Files must NOT appear next to the input file
+    assert not (tmp_path / "valid.json").exists()
+
+
+def test_integration_output_dir_with_report(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    out = tmp_path / "out"
+    _run_main(ckl_module, f, ["--output-dir", str(out), "--report"])
+    assert (out / "report_valid.txt").exists()
+
+
+def test_integration_output_dir_with_chunk(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    out = tmp_path / "out"
+    _run_main(ckl_module, f, ["--output-dir", str(out), "--chunk", "2"])
+    assert (out / "valid_chunk_001.md").exists()
+    assert (out / "valid_chunk_002.md").exists()
