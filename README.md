@@ -31,10 +31,19 @@ python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report] [--prompt]
 | `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
 | `--run-as-root` | flag | Bypass the root-execution block (see [Security](#security)) |
 | `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats |
-| `--prompt` | flag | Also write a `prompt_<name>.md` with a genAI system prompt prepended to the Markdown, ready to paste into a chatbot |
+| `--prompt [STYLE]` | optional | Also write a `prompt_<name>.md` with a genAI system prompt prepended to the Markdown, ready to paste into a chatbot. `STYLE` defaults to `analyst` if omitted (see table below) |
 | `--chunk N` | integer | Also split the Markdown into files of N findings each (`<name>_chunk_001.md`, …) — useful for large STIGs that exceed an LLM's context window |
 | `--quiet` | flag | Suppress `[INFO]` and `[WARNING]` messages; `[ERROR]` messages are always shown |
 | `--output-dir DIR` | path | Write all output files to `DIR` instead of alongside the input (directory is created automatically if it does not exist) |
+
+#### `--prompt` styles
+
+| Style | Intended use | Output format |
+|---|---|---|
+| `analyst` | Open-ended Q&A with a compliance expert (default) | Free-form analysis |
+| `poam` | Generate a Plan of Action & Milestones for open findings | CSV table — paste into Excel |
+| `brief` | Executive briefing for leadership | Markdown tables/headings — paste into Word |
+| `remediation` | Step-by-step fix guide for the SA doing the work | Structured per-finding sections |
 
 ### Examples
 
@@ -45,8 +54,17 @@ python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl
 # Also emit a stats summary
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --report
 
-# Generate a paste-ready genAI prompt file
+# Generate a paste-ready genAI prompt file (default analyst style)
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --prompt
+
+# Generate a CSV POA&M table prompt for Excel
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --prompt poam
+
+# Generate a Word-ready executive briefing prompt
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --prompt brief
+
+# Generate a technical remediation guide prompt
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --prompt remediation
 
 # Split a large STIG into 20-finding chunks for LLM context limits
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --chunk 20

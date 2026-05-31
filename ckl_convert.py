@@ -491,7 +491,7 @@ def build_report(data: dict) -> str:
 # GenAI prompt wrapper
 # ---------------------------------------------------------------------------
 
-_GENAI_PROMPT = """\
+_PROMPT_ANALYST = """\
 You are a STIG compliance analyst reviewing an active DISA STIG security checklist.
 The checklist below contains vulnerability findings for the specified host.
 Your role is to help analyse findings, prioritise remediation efforts, identify common
@@ -501,10 +501,65 @@ Base all remediation guidance on the check and fix text provided in the checklis
 Focus on Open and Not_Reviewed findings as the highest-priority items.
 """
 
+_PROMPT_POAM = """\
+You are a STIG compliance analyst. Using the DISA STIG checklist below, produce a
+Plan of Action & Milestones (POA&M) table for all Open and Not_Reviewed findings.
 
-def build_prompt_md(data: dict) -> str:
-    """Return the genAI system prompt prepended to the full Markdown output."""
-    return _GENAI_PROMPT + "\n---\n\n" + build_markdown(data)
+Output the table in CSV format with exactly these columns:
+Weakness,Asset,CAT Level,Vuln_Num,Rule_ID,Finding Details,Recommended Mitigation,POC,Scheduled Completion Date,Status
+
+Rules:
+- CAT Level: CAT I for high, CAT II for medium, CAT III for low severity
+- Leave POC and Scheduled Completion Date blank for the user to fill in
+- Wrap any field containing commas or newlines in double quotes
+- Include a header row
+- Include only Open and Not_Reviewed findings; skip NotAFinding and Not Applicable
+"""
+
+_PROMPT_BRIEF = """\
+You are a STIG compliance analyst preparing an executive briefing for leadership.
+Using the DISA STIG checklist below, produce a Word-ready briefing document with
+the following structure:
+
+1. Executive Summary (2-3 sentences: host, total findings, most critical items)
+2. Findings Overview Table (columns: CAT Level | Count | Percentage of Total)
+3. Open Findings Table (columns: Vuln_Num | Title | Severity | Status | One-line Summary)
+4. Top Priorities (the 3-5 most critical open findings, each with a single action item)
+5. Recommended Next Steps (bulleted list)
+
+Use Markdown headings and tables. Keep language accessible to a non-technical audience.
+"""
+
+_PROMPT_REMEDIATION = """\
+You are a STIG system administrator preparing a technical remediation guide.
+Using the DISA STIG checklist below, produce a step-by-step remediation guide
+for all Open and Not_Reviewed findings.
+
+For each finding, produce a section with:
+- Finding ID and title
+- Severity and current status
+- What was found (from Finding Details)
+- Exact commands or configuration file changes to remediate
+- How to verify the fix is in place
+
+Order findings by severity (CAT I first), then by Vuln_Num within each category.
+Skip NotAFinding and Not Applicable entries entirely. Be specific and actionable.
+"""
+
+_PROMPT_TEMPLATES: dict = {
+    "analyst":     _PROMPT_ANALYST,
+    "poam":        _PROMPT_POAM,
+    "brief":       _PROMPT_BRIEF,
+    "remediation": _PROMPT_REMEDIATION,
+}
+
+PROMPT_STYLES = sorted(_PROMPT_TEMPLATES)
+
+
+def build_prompt_md(data: dict, style: str = "analyst") -> str:
+    """Return the chosen genAI prompt template prepended to the full Markdown output."""
+    template = _PROMPT_TEMPLATES.get(style, _PROMPT_ANALYST)
+    return template + "\n---\n\n" + build_markdown(data)
 
 
 # ---------------------------------------------------------------------------
@@ -563,9 +618,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--prompt",
-        action="store_true",
-        default=False,
-        help="Also write a prompt_<name>.md with a genAI system prompt prepended to the Markdown.",
+        nargs="?",
+        const="analyst",
+        default=None,
+        metavar="STYLE",
+        choices=PROMPT_STYLES,
+        help=(
+            "Also write a prompt_<name>.md with a genAI system prompt prepended to the Markdown. "
+            f"STYLE is one of: {', '.join(PROMPT_STYLES)} (default: analyst). "
+            "analyst=open-ended Q&A; poam=CSV POA&M table; "
+            "brief=Word-ready executive briefing; remediation=technical fix guide."
+        ),
     )
     parser.add_argument(
         "--chunk",
@@ -663,9 +726,9 @@ def main() -> int:
         outputs_ok = outputs_ok and ok_report
 
     # --- Prompt (opt-in) -----------------------------------------------------
-    if args.prompt:
+    if args.prompt is not None:
         prompt_path = output_dir / f"prompt_{stem}.md"
-        ok_prompt = write_file(prompt_path, build_prompt_md(data), "Prompt")
+        ok_prompt = write_file(prompt_path, build_prompt_md(data, args.prompt), f"Prompt ({args.prompt})")
         outputs_ok = outputs_ok and ok_prompt
 
     # --- Chunks (opt-in) -----------------------------------------------------
