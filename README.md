@@ -20,7 +20,7 @@ external dependencies — stdlib only.
 ## Usage
 
 ```bash
-python3 ckl_convert.py INPUT_FILE [--run-as-root]
+python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report]
 ```
 
 ### Arguments
@@ -29,12 +29,16 @@ python3 ckl_convert.py INPUT_FILE [--run-as-root]
 |---|---|---|
 | `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
 | `--run-as-root` | flag | Bypass the root-execution block (see [Security](#security)) |
+| `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats |
 
 ### Examples
 
 ```bash
 # Standard usage
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl
+
+# Also emit a stats summary
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --report
 
 # Override root block — document your reason in change control
 sudo python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --run-as-root
@@ -50,6 +54,12 @@ U_RHEL_8_STIG.ckl   ← input
 U_RHEL_8_STIG.json  ← fully nested, indented JSON
 U_RHEL_8_STIG.toml  ← [asset] table + [[vulnerabilities]] array of tables
 U_RHEL_8_STIG.md    ← asset list + summary table + detailed findings
+```
+
+With `--report`, an additional plain-text summary is written alongside them:
+
+```
+report_U_RHEL_8_STIG.txt  ← header + Status / Severity breakdown (counts + %)
 ```
 
 ---
@@ -240,6 +250,24 @@ python3 -m pytest tests/test_integration.py -v  # full pipeline via main()
 | `test_validation.py` | `validate_input()` | 14 |
 | `test_parsing.py` | `parse_asset()`, `parse_vulnerabilities()`, `parse_ckl()` | 21 |
 | `test_integration.py` | `main()` end-to-end pipeline | 14 |
+
+---
+
+## RHEL Compatibility
+
+The script is a single stdlib-only file with no compiled extensions or
+third-party packages, so it runs unmodified across the full RHEL lifecycle:
+
+| RHEL Release | System Python | Status |
+|---|---|---|
+| RHEL 8 | 3.6 | ✅ Supported (original target) |
+| RHEL 9 | 3.9 | ✅ Supported — no changes required |
+| RHEL 10 | 3.12 | ✅ Supported — no changes required |
+
+All stdlib modules used (`argparse`, `json`, `os`, `re`, `sys`,
+`xml.etree.ElementTree`, `datetime`, `pathlib`) are present in every version
+above. No version-gated syntax is used. The `datetime.now(timezone.utc)` form
+is used throughout, so there are no deprecation warnings on Python 3.12.
 
 ---
 

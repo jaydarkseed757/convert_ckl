@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -189,6 +190,9 @@ def _toml_escape_string(value: str) -> str:
     value = value.replace("\n", "\\n")
     value = value.replace("\r", "\\r")
     value = value.replace("\t", "\\t")
+    # Remaining C0 control chars and DEL have no named TOML escape; use \uXXXX.
+    value = re.sub(r"[\x00-\x07\x0b\x0e-\x1f\x7f]",
+                   lambda m: f"\\u{ord(m.group()):04X}", value)
     return value
 
 
@@ -199,11 +203,15 @@ def _toml_kv(key: str, value) -> str:
     A string value is emitted as a quoted basic string; a list value is
     emitted as a TOML array of quoted strings (this is how repeated
     STIG_DATA attributes such as CCI_REF are represented).
+
+    Keys that are not valid TOML bare keys (A-Z a-z 0-9 - _) are quoted
+    so that dots or other characters are not misread as dotted-key syntax.
     """
+    safe_key = key if re.fullmatch(r"[A-Za-z0-9_-]+", key) else f'"{_toml_escape_string(key)}"'
     if isinstance(value, list):
         items = ", ".join(f'"{_toml_escape_string(str(v))}"' for v in value)
-        return f"{key} = [{items}]"
-    return f'{key} = "{_toml_escape_string(str(value))}"'
+        return f"{safe_key} = [{items}]"
+    return f'{safe_key} = "{_toml_escape_string(str(value))}"'
 
 
 def build_toml(data: dict) -> str:
@@ -389,6 +397,81 @@ def build_markdown(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Plain-text processing report
+# ---------------------------------------------------------------------------
+
+# STIG severity → DISA category label
+_SEVERITY_LABELS = {
+    "high":   "CAT I (high)",
+    "medium": "CAT II (medium)",
+    "low":    "CAT III (low)",
+}
+
+
+def build_report(data: dict) -> str:
+    """
+    Build a plain-text summary of what was processed: a short header plus a
+    Status breakdown and a Severity breakdown (counts and percentages).
+    """
+    asset = data["asset"]
+    host  = asset.get("HOST_NAME") or asset.get("ASSET_NAME") or "Unknown Host"
+    vulns = data["vulnerabilities"]
+    total = len(vulns)
+
+    def _pct(count: int) -> str:
+        return f"{100.0 * count / total:.1f}" if total else "0.0"
+
+    lines: list = []
+    lines.append("=" * 50)
+    lines.append(" STIG Checklist Processing Report")
+    lines.append("=" * 50)
+    lines.append(f"Source file    : {data['source_file']}")
+    lines.append(f"Host           : {host}")
+    lines.append(f"Generated      : {data['converted_at']}")
+    lines.append(f"Total findings : {total}")
+    lines.append("")
+
+    # --- Status breakdown ----------------------------------------------------
+    lines.append("Status Breakdown")
+    lines.append("-" * 16)
+    if not vulns:
+        lines.append("(none)")
+    else:
+        status_counts: dict = {}
+        for v in vulns:
+            s = v.get("STATUS") or "Unknown"
+            status_counts[s] = status_counts.get(s, 0) + 1
+        for status, count in sorted(status_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"{status:<18} {count:>4}  ({_pct(count)}%)")
+    lines.append("")
+
+    # --- Severity breakdown --------------------------------------------------
+    lines.append("Severity Breakdown")
+    lines.append("-" * 18)
+    if not vulns:
+        lines.append("(none)")
+    else:
+        sev_counts: dict = {}
+        for v in vulns:
+            raw = (v.get("stig_data", {}).get("Severity") or "").strip().lower()
+            label = _SEVERITY_LABELS.get(raw, f"Other ({raw})" if raw else "Unspecified")
+            sev_counts[label] = sev_counts.get(label, 0) + 1
+        # Order: CAT I, II, III first (in that order), then any extras by count desc.
+        ordered = [_SEVERITY_LABELS["high"], _SEVERITY_LABELS["medium"], _SEVERITY_LABELS["low"]]
+        seen = set()
+        for label in ordered:
+            if label in sev_counts:
+                seen.add(label)
+                lines.append(f"{label:<18} {sev_counts[label]:>4}  ({_pct(sev_counts[label])}%)")
+        for label, count in sorted((kv for kv in sev_counts.items() if kv[0] not in seen),
+                                   key=lambda kv: (-kv[1], kv[0])):
+            lines.append(f"{label:<18} {count:>4}  ({_pct(count)}%)")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # File writing helpers
 # ---------------------------------------------------------------------------
 
@@ -435,6 +518,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Bypass the root-execution block. "
             "Use only if you have a documented operational need and understand the risk."
         ),
+    )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        default=False,
+        help="Also write a plain-text report_<name>.txt summary of processing stats.",
     )
     return parser
 
@@ -499,7 +588,15 @@ def main() -> int:
     md_content = build_markdown(data)
     ok_md = write_file(md_path, md_content, "Markdown")
 
-    if ok_json and ok_toml and ok_md:
+    outputs_ok = ok_json and ok_toml and ok_md
+
+    # --- Report (opt-in) -----------------------------------------------------
+    if args.report:
+        report_path = output_dir / f"report_{stem}.txt"
+        ok_report = write_file(report_path, build_report(data), "Report")
+        outputs_ok = outputs_ok and ok_report
+
+    if outputs_ok:
         print("[INFO] Conversion complete.")
         return 0
 
