@@ -30,6 +30,23 @@ VALID_EXTENSIONS = {".ckl", ".chk"}
 
 
 # ---------------------------------------------------------------------------
+# Quiet-mode helpers
+# ---------------------------------------------------------------------------
+
+_quiet: bool = False   # set to True by --quiet in main()
+
+
+def _info(msg: str) -> None:
+    if not _quiet:
+        print(msg)
+
+
+def _warn(msg: str) -> None:
+    if not _quiet:
+        print(msg, file=sys.stderr)
+
+
+# ---------------------------------------------------------------------------
 # Root guard
 # ---------------------------------------------------------------------------
 
@@ -83,10 +100,9 @@ def validate_input(path: str) -> Path:
         sys.exit(1)
 
     if p.suffix.lower() not in VALID_EXTENSIONS:
-        print(
+        _warn(
             f"[WARNING] Unexpected file extension '{p.suffix}'. "
-            f"Expected one of {sorted(VALID_EXTENSIONS)}. Attempting to parse anyway.",
-            file=sys.stderr,
+            f"Expected one of {sorted(VALID_EXTENSIONS)}. Attempting to parse anyway."
         )
 
     return p.resolve()
@@ -472,6 +488,26 @@ def build_report(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# GenAI prompt wrapper
+# ---------------------------------------------------------------------------
+
+_GENAI_PROMPT = """\
+You are a STIG compliance analyst reviewing an active DISA STIG security checklist.
+The checklist below contains vulnerability findings for the specified host.
+Your role is to help analyse findings, prioritise remediation efforts, identify common
+root causes, and answer questions about compliance status and mitigation strategies.
+
+Base all remediation guidance on the check and fix text provided in the checklist.
+Focus on Open and Not_Reviewed findings as the highest-priority items.
+"""
+
+
+def build_prompt_md(data: dict) -> str:
+    """Return the genAI system prompt prepended to the full Markdown output."""
+    return _GENAI_PROMPT + "\n---\n\n" + build_markdown(data)
+
+
+# ---------------------------------------------------------------------------
 # File writing helpers
 # ---------------------------------------------------------------------------
 
@@ -525,6 +561,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Also write a plain-text report_<name>.txt summary of processing stats.",
     )
+    parser.add_argument(
+        "--prompt",
+        action="store_true",
+        default=False,
+        help="Also write a prompt_<name>.md with a genAI system prompt prepended to the Markdown.",
+    )
+    parser.add_argument(
+        "--chunk",
+        type=int,
+        metavar="N",
+        default=None,
+        help="Also split the Markdown into chunks of N findings each (<name>_chunk_001.md, ...).",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="Suppress [INFO] and [WARNING] messages. [ERROR] messages are always shown.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        metavar="DIR",
+        default=None,
+        help="Write all output files to DIR (created automatically if it does not exist).",
+    )
     return parser
 
 
@@ -536,34 +598,38 @@ def main() -> int:
     parser = build_parser()
     args   = parser.parse_args()
 
+    # Apply quiet flag before any output
+    global _quiet
+    _quiet = args.quiet
+
     # 1. Root guard
     check_root(args.run_as_root)
 
     # 2. Validate input
     input_path = validate_input(args.input_file)
 
-    print(f"[INFO] Parsing: {input_path}")
+    _info(f"[INFO] Parsing: {input_path}")
 
     # 3. Parse XML
     data = parse_ckl(input_path)
 
     # 4. Verify extraction
     if not data["vulnerabilities"]:
-        print(
+        _warn(
             "[WARNING] No <VULN> nodes were found in the checklist. "
-            "Output files will be generated but will contain no vulnerability data.",
-            file=sys.stderr,
+            "Output files will be generated but will contain no vulnerability data."
         )
 
     if not data["asset"]:
-        print(
-            "[WARNING] No <ASSET> node was found in the checklist.",
-            file=sys.stderr,
-        )
+        _warn("[WARNING] No <ASSET> node was found in the checklist.")
 
-    # 5. Derive output paths (same directory as input, same stem)
-    stem       = input_path.stem
-    output_dir = input_path.parent
+    # 5. Derive output paths
+    stem = input_path.stem
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = input_path.parent
 
     json_path = output_dir / f"{stem}.json"
     toml_path = output_dir / f"{stem}.toml"
@@ -596,8 +662,29 @@ def main() -> int:
         ok_report = write_file(report_path, build_report(data), "Report")
         outputs_ok = outputs_ok and ok_report
 
+    # --- Prompt (opt-in) -----------------------------------------------------
+    if args.prompt:
+        prompt_path = output_dir / f"prompt_{stem}.md"
+        ok_prompt = write_file(prompt_path, build_prompt_md(data), "Prompt")
+        outputs_ok = outputs_ok and ok_prompt
+
+    # --- Chunks (opt-in) -----------------------------------------------------
+    if args.chunk is not None:
+        if args.chunk <= 0:
+            print("[ERROR] --chunk value must be a positive integer.", file=sys.stderr)
+            return 1
+        n      = args.chunk
+        vulns  = data["vulnerabilities"]
+        total  = max(1, (len(vulns) + n - 1) // n)
+        for i in range(total):
+            chunk_data    = {**data, "vulnerabilities": vulns[i * n:(i + 1) * n]}
+            chunk_content = f"<!-- Chunk {i + 1} of {total} -->\n\n" + build_markdown(chunk_data)
+            chunk_path    = output_dir / f"{stem}_chunk_{i + 1:03d}.md"
+            ok_c = write_file(chunk_path, chunk_content, f"Chunk {i + 1}/{total}")
+            outputs_ok = outputs_ok and ok_c
+
     if outputs_ok:
-        print("[INFO] Conversion complete.")
+        _info("[INFO] Conversion complete.")
         return 0
 
     print("[ERROR] One or more output files could not be written.", file=sys.stderr)
