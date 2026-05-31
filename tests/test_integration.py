@@ -288,6 +288,54 @@ def test_integration_prompt_default_outputs_still_written(ckl_module, tmp_path):
     assert (tmp_path / "valid.md").exists()
 
 
+def test_integration_prompt_default_style_is_analyst(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "STIG compliance analyst" in content
+
+
+def test_integration_prompt_explicit_analyst_style(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt", "analyst"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "STIG compliance analyst" in content
+
+
+def test_integration_prompt_poam_style(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt", "poam"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "POA&M" in content
+    assert "CSV" in content
+    assert "CAT Level" in content
+
+
+def test_integration_prompt_brief_style(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt", "brief"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "Executive Summary" in content
+    assert "leadership" in content
+
+
+def test_integration_prompt_remediation_style(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--prompt", "remediation"])
+    content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+    assert "remediation" in content.lower()
+    assert "commands" in content.lower()
+
+
+def test_integration_prompt_all_styles_include_markdown(ckl_module, tmp_path):
+    """Every style must append the full Markdown output after the prompt."""
+    for style in ("analyst", "poam", "brief", "remediation"):
+        f = _copy_fixture("valid.ckl", tmp_path)
+        _run_main(ckl_module, f, ["--prompt", style])
+        content = (tmp_path / "prompt_valid.md").read_text(encoding="utf-8")
+        assert "rhel8-node01" in content, f"Style '{style}' missing Markdown content"
+
+
 # ---------------------------------------------------------------------------
 # --chunk flag
 # ---------------------------------------------------------------------------
