@@ -253,10 +253,12 @@ python3 -m pytest tests/test_integration.py -v  # full pipeline via main()
 
 ---
 
-## RHEL Compatibility
+## Platform Compatibility
 
 The script is a single stdlib-only file with no compiled extensions or
-third-party packages, so it runs unmodified across the full RHEL lifecycle:
+third-party packages, so it runs unmodified across platforms and Python versions:
+
+### RHEL / Linux
 
 | RHEL Release | System Python | Status |
 |---|---|---|
@@ -264,9 +266,20 @@ third-party packages, so it runs unmodified across the full RHEL lifecycle:
 | RHEL 9 | 3.9 | ✅ Supported — no changes required |
 | RHEL 10 | 3.12 | ✅ Supported — no changes required |
 
+### macOS
+
+| macOS Release | Status |
+|---|---|
+| macOS 25 | ✅ Verified by user testing |
+
+### Windows
+
+Not currently supported — `os.geteuid()` is Unix-only and will raise
+`AttributeError` on Windows. Planned for a future release.
+
 All stdlib modules used (`argparse`, `json`, `os`, `re`, `sys`,
-`xml.etree.ElementTree`, `datetime`, `pathlib`) are present in every version
-above. No version-gated syntax is used. The `datetime.now(timezone.utc)` form
+`xml.etree.ElementTree`, `datetime`, `pathlib`) are present in every supported
+version. No version-gated syntax is used. The `datetime.now(timezone.utc)` form
 is used throughout, so there are no deprecation warnings on Python 3.12.
 
 ---
