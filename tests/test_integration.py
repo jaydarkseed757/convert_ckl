@@ -1,26 +1,9 @@
 """End-to-end integration tests for the full conversion pipeline (main())."""
 import json
-import pathlib
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
-_FIXTURES = pathlib.Path(__file__).parent / "fixtures"
-
-
-def _copy_fixture(name: str, tmp_path: Path) -> Path:
-    """Copy a fixture file into tmp_path so output files land there, not in fixtures/."""
-    src = _FIXTURES / name
-    dest = tmp_path / name
-    dest.write_bytes(src.read_bytes())
-    return dest
-
-
-def _run_main(ckl_module, ckl_path: Path, extra_argv: list = None):
-    """Invoke main() with sys.argv pointing at ckl_path, running as non-root."""
-    argv = ["ckl_convert", str(ckl_path)] + (extra_argv or [])
-    with patch("sys.argv", argv), patch("os.geteuid", return_value=1000):
-        return ckl_module.main()
+from tests.conftest import copy_fixture as _copy_fixture, run_main as _run_main
 
 
 # ---------------------------------------------------------------------------
@@ -415,12 +398,29 @@ def test_integration_no_quiet_still_shows_warning(ckl_module, tmp_path, capsys):
 
 def test_integration_quiet_still_shows_error(ckl_module, tmp_path, capsys):
     f = _copy_fixture("valid.ckl", tmp_path)
-    from unittest.mock import patch
     with patch("sys.argv", ["ckl_convert", str(f), "--quiet"]), \
          patch("os.geteuid", return_value=1000), \
          patch.object(ckl_module, "write_file", return_value=False):
         ckl_module.main()
     assert "[ERROR]" in capsys.readouterr().err
+
+
+def test_integration_quiet_suppresses_ok_lines_on_stdout(ckl_module, tmp_path, capsys):
+    """--quiet must silence [OK]/[INFO] stdout output entirely on success."""
+    f = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, f, ["--quiet"])
+    assert result == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_integration_chunk_zero_writes_no_files(ckl_module, tmp_path):
+    """An invalid --chunk value must fail before any output file is written."""
+    f = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, f, ["--chunk", "0"])
+    assert result == 1
+    assert not (tmp_path / "valid.json").exists()
+    assert not (tmp_path / "valid.toml").exists()
+    assert not (tmp_path / "valid.md").exists()
 
 
 # ---------------------------------------------------------------------------

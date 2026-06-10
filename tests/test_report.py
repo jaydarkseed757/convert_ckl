@@ -166,6 +166,32 @@ def test_report_empty_severity_is_unspecified(ckl_module):
 
 
 # ---------------------------------------------------------------------------
+# Severity override
+# ---------------------------------------------------------------------------
+
+def test_report_severity_override_recategorises(ckl_module):
+    v = _vuln(severity="high")
+    v["SEVERITY_OVERRIDE"] = "medium"
+    out = ckl_module.build_report(_make_data(vulns=[v]))
+    assert "CAT II (medium)" in out
+    assert "CAT I (high)" not in out
+
+
+def test_report_severity_override_annotation(ckl_module):
+    v = _vuln(severity="high")
+    v["SEVERITY_OVERRIDE"] = "medium"
+    out = ckl_module.build_report(_make_data(vulns=[v]))
+    lines = out.splitlines()
+    cat2 = next(l for l in lines if l.startswith("CAT II (medium)"))
+    assert "[1 overridden]" in cat2
+
+
+def test_report_no_override_no_annotation(ckl_module):
+    out = ckl_module.build_report(_make_data(vulns=[_vuln(severity="medium")]))
+    assert "overridden" not in out
+
+
+# ---------------------------------------------------------------------------
 # Empty vulnerability list
 # ---------------------------------------------------------------------------
 

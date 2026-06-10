@@ -30,7 +30,7 @@ python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report] [--prompt]
 |---|---|---|
 | `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
 | `--run-as-root` | flag | Bypass the root-execution block (see [Security](#security)) |
-| `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats |
+| `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats. The severity breakdown honours `SEVERITY_OVERRIDE` (overridden findings count under their overridden CAT level, annotated `[N overridden]`) |
 | `--prompt [STYLE]` | optional | Also write a `prompt_<name>.md` with a genAI system prompt prepended to the Markdown, ready to paste into a chatbot. `STYLE` defaults to `analyst` if omitted (see table below) |
 | `--chunk N` | integer | Also split the Markdown into files of N findings each (`<name>_chunk_001.md`, …) — useful for large STIGs that exceed an LLM's context window |
 | `--quiet` | flag | Suppress `[INFO]` and `[WARNING]` messages; `[ERROR]` messages are always shown |

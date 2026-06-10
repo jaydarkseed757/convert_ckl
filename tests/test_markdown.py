@@ -224,3 +224,33 @@ def test_build_markdown_list_severity_rendered_via_md_escape(ckl_module):
     out = ckl_module.build_markdown(_make_data(vulns=[vuln]))
     assert "high" in out
     assert "medium" in out
+
+
+# ---------------------------------------------------------------------------
+# Free-text blocks rendered as blockquotes (Markdown-injection containment)
+# ---------------------------------------------------------------------------
+
+def test_build_markdown_finding_details_blockquoted(ckl_module):
+    out = ckl_module.build_markdown(_make_data(vulns=[_vuln(finding="Patch missing.")]))
+    assert "> Patch missing." in out
+
+
+def test_build_markdown_comments_blockquoted(ckl_module):
+    out = ckl_module.build_markdown(_make_data(vulns=[_vuln(comments="Reviewed OK.")]))
+    assert "> Reviewed OK." in out
+
+
+def test_build_markdown_finding_details_hr_neutralised(ckl_module):
+    # A '---' line inside finding details must not render as a bare horizontal
+    # rule that mimics the per-finding separator.
+    out = ckl_module.build_markdown(_make_data(vulns=[_vuln(finding="before\n---\nafter")]))
+    assert "> ---" in out
+    lines = out.splitlines()
+    # The only bare '---' lines are the structural separators, one per finding.
+    assert lines.count("---") == 1
+
+
+def test_build_markdown_multiline_finding_each_line_quoted(ckl_module):
+    out = ckl_module.build_markdown(_make_data(vulns=[_vuln(finding="line one\nline two")]))
+    assert "> line one" in out
+    assert "> line two" in out
