@@ -2,32 +2,21 @@
 import json
 import pathlib
 import pytest
-from unittest.mock import patch
 
-_FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+from tests.conftest import copy_fixture as _copy_fixture, run_main as _run_main
 
 # Fixture stats (update these if the fixture file changes)
 TOTAL_FINDINGS = 15
-CAT_I_COUNT = 4    # high
+CAT_I_COUNT = 4    # high (raw Severity, as serialised to JSON/TOML)
 CAT_II_COUNT = 7   # medium
 CAT_III_COUNT = 4  # low
+# The report applies SEVERITY_OVERRIDE: V-230223 is high overridden to medium.
+REPORT_CAT_I_COUNT = 3
+REPORT_CAT_II_COUNT = 8
 STATUS_OPEN = 6
 STATUS_NAF = 4     # NotAFinding
 STATUS_NA = 3      # Not Applicable
 STATUS_NR = 2      # Not_Reviewed
-
-
-def _copy_fixture(name: str, tmp_path: pathlib.Path) -> pathlib.Path:
-    src = _FIXTURES / name
-    dest = tmp_path / name
-    dest.write_bytes(src.read_bytes())
-    return dest
-
-
-def _run_main(ckl_module, ckl_path: pathlib.Path, extra_argv: list = None):
-    argv = ["ckl_convert", str(ckl_path)] + (extra_argv or [])
-    with patch("sys.argv", argv), patch("os.geteuid", return_value=1000):
-        return ckl_module.main()
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +322,18 @@ def test_rhel8_report_cat_i_count(ckl_module, tmp_path):
     content = (tmp_path / "report_rhel8_stig.txt").read_text(encoding="utf-8")
     lines = content.splitlines()
     cat1_line = next(l for l in lines if l.startswith("CAT I (high)"))
-    assert str(CAT_I_COUNT) in cat1_line
+    assert str(REPORT_CAT_I_COUNT) in cat1_line
+
+
+def test_rhel8_report_override_moves_finding_to_cat_ii(ckl_module, tmp_path):
+    """V-230223 (Severity=high, SEVERITY_OVERRIDE=medium) counts under CAT II."""
+    f = _copy_fixture("rhel8_stig.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--report"])
+    content = (tmp_path / "report_rhel8_stig.txt").read_text(encoding="utf-8")
+    lines = content.splitlines()
+    cat2_line = next(l for l in lines if l.startswith("CAT II (medium)"))
+    assert str(REPORT_CAT_II_COUNT) in cat2_line
+    assert "[1 overridden]" in cat2_line
 
 
 def test_rhel8_report_open_count(ckl_module, tmp_path):

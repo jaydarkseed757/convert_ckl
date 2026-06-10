@@ -212,6 +212,10 @@ def _toml_escape_string(value: str) -> str:
     return value
 
 
+# Valid TOML bare-key characters; anything else forces a quoted key.
+_BARE_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
+
+
 def _toml_kv(key: str, value) -> str:
     """
     Return a single TOML `key = value` line.
@@ -223,7 +227,7 @@ def _toml_kv(key: str, value) -> str:
     Keys that are not valid TOML bare keys (A-Z a-z 0-9 - _) are quoted
     so that dots or other characters are not misread as dotted-key syntax.
     """
-    safe_key = key if re.fullmatch(r"[A-Za-z0-9_-]+", key) else f'"{_toml_escape_string(key)}"'
+    safe_key = key if _BARE_KEY_RE.fullmatch(key) else f'"{_toml_escape_string(key)}"'
     if isinstance(value, list):
         items = ", ".join(f'"{_toml_escape_string(str(v))}"' for v in value)
         return f"{safe_key} = [{items}]"
@@ -309,6 +313,20 @@ def _md_escape(text) -> str:
     return text.replace("|", "\\|").replace("\n", " ").replace("\r", " ")
 
 
+def _display_host(asset: dict) -> str:
+    """Best-available host identifier for titles and report headers."""
+    return asset.get("HOST_NAME") or asset.get("ASSET_NAME") or "Unknown Host"
+
+
+def _count_statuses(vulns: list) -> dict:
+    """Count findings by STATUS; missing or empty status counts as 'Unknown'."""
+    counts: dict = {}
+    for v in vulns:
+        s = v.get("STATUS") or "Unknown"
+        counts[s] = counts.get(s, 0) + 1
+    return counts
+
+
 def build_markdown(data: dict) -> str:
     """
     Build a Markdown document with:
@@ -319,7 +337,7 @@ def build_markdown(data: dict) -> str:
     lines: list = []
 
     asset = data["asset"]
-    host  = asset.get("HOST_NAME") or asset.get("ASSET_NAME") or "Unknown Host"
+    host  = _display_host(asset)
 
     # --- Title ---------------------------------------------------------------
     lines.append(f"# STIG Checklist Report — {_md_escape(host)}")
@@ -347,11 +365,7 @@ def build_markdown(data: dict) -> str:
     if not vulns:
         lines.append("_No vulnerabilities found._")
     else:
-        # Count by status
-        status_counts: dict = {}
-        for v in vulns:
-            s = v.get("STATUS", "Unknown")
-            status_counts[s] = status_counts.get(s, 0) + 1
+        status_counts = _count_statuses(vulns)
 
         lines.append(f"**Total findings:** {len(vulns)}  ")
         for status, count in sorted(status_counts.items()):
@@ -391,19 +405,21 @@ def build_markdown(data: dict) -> str:
         lines.append(f"**Severity:** {_md_escape(severity)}  ")
         lines.append(f"**Status:** {_md_escape(status)}  ")
 
+        # Render free-text blocks as blockquotes so embedded Markdown syntax
+        # (#, ---, |) in checklist content cannot alter the document structure.
         finding = vuln.get("FINDING_DETAILS", "").strip()
         if finding:
             lines.append("")
             lines.append("**Finding Details:**")
             lines.append("")
-            lines.append(finding)
+            lines.extend(f"> {ln}" for ln in finding.splitlines())
 
         comments = vuln.get("COMMENTS", "").strip()
         if comments:
             lines.append("")
             lines.append("**Comments:**")
             lines.append("")
-            lines.append(comments)
+            lines.extend(f"> {ln}" for ln in comments.splitlines())
 
         lines.append("")
         lines.append("---")
@@ -430,7 +446,7 @@ def build_report(data: dict) -> str:
     Status breakdown and a Severity breakdown (counts and percentages).
     """
     asset = data["asset"]
-    host  = asset.get("HOST_NAME") or asset.get("ASSET_NAME") or "Unknown Host"
+    host  = _display_host(asset)
     vulns = data["vulnerabilities"]
     total = len(vulns)
 
@@ -453,10 +469,7 @@ def build_report(data: dict) -> str:
     if not vulns:
         lines.append("(none)")
     else:
-        status_counts: dict = {}
-        for v in vulns:
-            s = v.get("STATUS") or "Unknown"
-            status_counts[s] = status_counts.get(s, 0) + 1
+        status_counts = _count_statuses(vulns)
         for status, count in sorted(status_counts.items(), key=lambda kv: (-kv[1], kv[0])):
             lines.append(f"{status:<18} {count:>4}  ({_pct(count)}%)")
     lines.append("")
@@ -467,21 +480,36 @@ def build_report(data: dict) -> str:
     if not vulns:
         lines.append("(none)")
     else:
+        # A SEVERITY_OVERRIDE recategorises a finding (e.g. high → medium with
+        # documented justification), so it takes precedence over the raw Severity.
         sev_counts: dict = {}
+        override_counts: dict = {}
         for v in vulns:
-            raw = (v.get("stig_data", {}).get("Severity") or "").strip().lower()
+            original = (v.get("stig_data", {}).get("Severity") or "").strip().lower()
+            override = (v.get("SEVERITY_OVERRIDE") or "").strip().lower()
+            raw = override or original
             label = _SEVERITY_LABELS.get(raw, f"Other ({raw})" if raw else "Unspecified")
             sev_counts[label] = sev_counts.get(label, 0) + 1
+            if override:
+                override_counts[label] = override_counts.get(label, 0) + 1
+
+        def _sev_line(label: str, count: int) -> str:
+            line = f"{label:<18} {count:>4}  ({_pct(count)}%)"
+            overridden = override_counts.get(label, 0)
+            if overridden:
+                line += f"  [{overridden} overridden]"
+            return line
+
         # Order: CAT I, II, III first (in that order), then any extras by count desc.
         ordered = [_SEVERITY_LABELS["high"], _SEVERITY_LABELS["medium"], _SEVERITY_LABELS["low"]]
         seen = set()
         for label in ordered:
             if label in sev_counts:
                 seen.add(label)
-                lines.append(f"{label:<18} {sev_counts[label]:>4}  ({_pct(sev_counts[label])}%)")
+                lines.append(_sev_line(label, sev_counts[label]))
         for label, count in sorted((kv for kv in sev_counts.items() if kv[0] not in seen),
                                    key=lambda kv: (-kv[1], kv[0])):
-            lines.append(f"{label:<18} {count:>4}  ({_pct(count)}%)")
+            lines.append(_sev_line(label, count))
     lines.append("")
 
     return "\n".join(lines)
@@ -556,10 +584,15 @@ _PROMPT_TEMPLATES: dict = {
 PROMPT_STYLES = sorted(_PROMPT_TEMPLATES)
 
 
-def build_prompt_md(data: dict, style: str = "analyst") -> str:
-    """Return the chosen genAI prompt template prepended to the full Markdown output."""
+def build_prompt_md(data: dict, style: str = "analyst", md_content: str = None) -> str:
+    """
+    Return the chosen genAI prompt template prepended to the Markdown output.
+    Pass an already-rendered md_content to avoid re-rendering the document.
+    """
     template = _PROMPT_TEMPLATES.get(style, _PROMPT_ANALYST)
-    return template + "\n---\n\n" + build_markdown(data)
+    if md_content is None:
+        md_content = build_markdown(data)
+    return template + "\n---\n\n" + md_content
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +603,7 @@ def write_file(path: Path, content: str, label: str) -> bool:
     """Write content to path with error handling. Returns True on success."""
     try:
         path.write_text(content, encoding="utf-8")
-        print(f"[OK] {label} written → {path}")
+        _info(f"[OK] {label} written → {path}")
         return True
     except PermissionError as exc:
         print(f"[ERROR] Permission denied writing {label} to '{path}': {exc}",
@@ -665,6 +698,11 @@ def main() -> int:
     global _quiet
     _quiet = args.quiet
 
+    # Reject bad option values before any parsing or file writing
+    if args.chunk is not None and args.chunk <= 0:
+        print("[ERROR] --chunk value must be a positive integer.", file=sys.stderr)
+        return 1
+
     # 1. Root guard
     check_root(args.run_as_root)
 
@@ -728,14 +766,12 @@ def main() -> int:
     # --- Prompt (opt-in) -----------------------------------------------------
     if args.prompt is not None:
         prompt_path = output_dir / f"prompt_{stem}.md"
-        ok_prompt = write_file(prompt_path, build_prompt_md(data, args.prompt), f"Prompt ({args.prompt})")
+        prompt_content = build_prompt_md(data, args.prompt, md_content)
+        ok_prompt = write_file(prompt_path, prompt_content, f"Prompt ({args.prompt})")
         outputs_ok = outputs_ok and ok_prompt
 
-    # --- Chunks (opt-in) -----------------------------------------------------
+    # --- Chunks (opt-in; value validated before parsing) ----------------------
     if args.chunk is not None:
-        if args.chunk <= 0:
-            print("[ERROR] --chunk value must be a positive integer.", file=sys.stderr)
-            return 1
         n      = args.chunk
         vulns  = data["vulnerabilities"]
         total  = max(1, (len(vulns) + n - 1) // n)
