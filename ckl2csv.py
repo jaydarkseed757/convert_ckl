@@ -60,6 +60,9 @@ def _warn(msg: str) -> None:
 
 def check_root(allow_root: bool) -> None:
     """Block execution as root unless explicitly overridden."""
+    if not hasattr(os, "geteuid"):
+        # Windows has no UID concept; the guard does not apply there.
+        return
     if os.geteuid() == 0:
         if allow_root:
             print(
@@ -99,7 +102,16 @@ def validate_input(path: str) -> Path:
         print(f"[ERROR] Path is not a regular file: {path}", file=sys.stderr)
         sys.exit(1)
 
-    if not os.access(p, os.R_OK):
+    # os.access() on Windows only checks the read-only attribute, not NTFS
+    # ACLs, so probe with a real open there; keep os.access on POSIX.
+    if sys.platform == "win32":
+        try:
+            with p.open("rb"):
+                pass
+        except OSError:
+            print(f"[ERROR] No read permission on file: {path}", file=sys.stderr)
+            sys.exit(1)
+    elif not os.access(p, os.R_OK):
         print(f"[ERROR] No read permission on file: {path}", file=sys.stderr)
         sys.exit(1)
 
@@ -178,7 +190,7 @@ def parse_ckl(filepath: Path) -> dict:
     """
     try:
         tree = ET.parse(str(filepath))
-    except ET.ParseError as exc:
+    except (ET.ParseError, OSError) as exc:
         print(f"[ERROR] XML parse error in '{filepath}': {exc}", file=sys.stderr)
         sys.exit(1)
 

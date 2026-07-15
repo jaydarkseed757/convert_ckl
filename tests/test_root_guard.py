@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 def test_non_root_does_nothing(ckl_module, capsys):
     """When not running as root the function returns None with no output."""
-    with patch("os.geteuid", return_value=1000):
+    with patch("os.geteuid", return_value=1000, create=True):
         result = ckl_module.check_root(allow_root=False)
 
     assert result is None
@@ -20,7 +20,7 @@ def test_non_root_does_nothing(ckl_module, capsys):
 
 def test_non_root_allow_root_flag_is_irrelevant(ckl_module, capsys):
     """allow_root=True has no effect when not running as root."""
-    with patch("os.geteuid", return_value=500):
+    with patch("os.geteuid", return_value=500, create=True):
         result = ckl_module.check_root(allow_root=True)
 
     assert result is None
@@ -35,7 +35,7 @@ def test_non_root_allow_root_flag_is_irrelevant(ckl_module, capsys):
 
 def test_root_without_flag_exits(ckl_module):
     """Running as root without allow_root=True must call sys.exit(1)."""
-    with patch("os.geteuid", return_value=0):
+    with patch("os.geteuid", return_value=0, create=True):
         with pytest.raises(SystemExit) as exc_info:
             ckl_module.check_root(allow_root=False)
 
@@ -44,7 +44,7 @@ def test_root_without_flag_exits(ckl_module):
 
 def test_root_without_flag_prints_security_error(ckl_module, capsys):
     """The exit message should go to stderr and mention the security risk."""
-    with patch("os.geteuid", return_value=0):
+    with patch("os.geteuid", return_value=0, create=True):
         try:
             ckl_module.check_root(allow_root=False)
         except SystemExit:
@@ -57,7 +57,7 @@ def test_root_without_flag_prints_security_error(ckl_module, capsys):
 
 def test_root_without_flag_produces_no_stdout(ckl_module, capsys):
     """Error output must go to stderr only, not stdout."""
-    with patch("os.geteuid", return_value=0):
+    with patch("os.geteuid", return_value=0, create=True):
         try:
             ckl_module.check_root(allow_root=False)
         except SystemExit:
@@ -72,7 +72,7 @@ def test_root_without_flag_produces_no_stdout(ckl_module, capsys):
 
 def test_root_with_flag_does_not_exit(ckl_module):
     """Running as root with allow_root=True must not raise SystemExit."""
-    with patch("os.geteuid", return_value=0):
+    with patch("os.geteuid", return_value=0, create=True):
         result = ckl_module.check_root(allow_root=True)
 
     assert result is None
@@ -80,7 +80,7 @@ def test_root_with_flag_does_not_exit(ckl_module):
 
 def test_root_with_flag_prints_warning(ckl_module, capsys):
     """A security warning must be emitted to stderr when bypassing the guard."""
-    with patch("os.geteuid", return_value=0):
+    with patch("os.geteuid", return_value=0, create=True):
         ckl_module.check_root(allow_root=True)
 
     err = capsys.readouterr().err
@@ -90,7 +90,13 @@ def test_root_with_flag_prints_warning(ckl_module, capsys):
 
 def test_root_with_flag_produces_no_stdout(ckl_module, capsys):
     """Warning output must go to stderr only, not stdout."""
-    with patch("os.geteuid", return_value=0):
+    with patch("os.geteuid", return_value=0, create=True):
         ckl_module.check_root(allow_root=True)
 
     assert capsys.readouterr().out == ""
+
+
+def test_check_root_noop_when_geteuid_missing(ckl_module, monkeypatch):
+    """Windows: os.geteuid doesn't exist; check_root must silently pass."""
+    monkeypatch.delattr("os.geteuid", raising=False)
+    ckl_module.check_root(False)   # must not raise or exit
