@@ -208,3 +208,12 @@ def test_report_no_vulns_shows_none_placeholder(ckl_module):
 def test_report_no_vulns_does_not_raise(ckl_module):
     # No ZeroDivisionError on percentage computation.
     ckl_module.build_report(_make_data(vulns=[]))
+
+
+def test_report_override_equal_to_original_not_annotated(ckl_module):
+    """Exporters that echo Severity into SEVERITY_OVERRIDE must not trigger [N overridden]."""
+    v = _vuln(severity="high")
+    v["SEVERITY_OVERRIDE"] = "high"
+    out = ckl_module.build_report(_make_data(vulns=[v]))
+    assert "overridden" not in out
+    assert "CAT I (high)" in out
