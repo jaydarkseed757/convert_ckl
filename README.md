@@ -1,23 +1,28 @@
-# ckl_convert.py
+# convert_ckl
 
-Converts DISA STIG Checklist files (`.ckl` / `.chk`) into **JSON**, **TOML**,
-and **Markdown** formats. Designed for hardened RHEL 8 environments with zero
-external dependencies — stdlib only.
+Two standalone tools that convert DISA STIG Checklist files (`.ckl` / `.chk`)
+into analyst-friendly formats. Zero external dependencies — stdlib only —
+designed for hardened environments (RHEL 8/9/10, macOS, Windows).
+
+| Tool | Converts to | Typical use |
+|---|---|---|
+| **`ckl_convert.py`** | JSON, TOML, Markdown (+ optional CSV, report, genAI prompt, chunks, diff) | Feed Markdown/prompts into a genAI chatbot; full-fidelity data exports |
+| **`ckl2csv.py`** | Flat CSV, one row per finding | Excel / POA&M workflows — copy this single file to any host |
 
 ---
 
 ## Requirements
 
 - Python 3.6+
-- No third-party packages — uses only `argparse`, `json`, `os`, `sys`,
-  `xml.etree.ElementTree`, `datetime`, and `pathlib`
+- No third-party packages — uses only `argparse`, `csv`, `json`, `os`, `re`,
+  `sys`, `xml.etree.ElementTree`, `datetime`, and `pathlib`
 
 > **Testing only:** `pytest` is the sole external dependency and is only
-> needed to run the test suite. It is not required to use `ckl_convert.py`.
+> needed to run the test suite. It is never required to run the tools.
 
 ---
 
-## Usage
+## ckl_convert.py
 
 ```bash
 python3 ckl_convert.py INPUT_FILE [INPUT_FILE ...] [--run-as-root] [--csv] [--report]
@@ -127,6 +132,43 @@ can never be hidden from the delta.
 
 ---
 
+## ckl2csv.py
+
+A fully standalone CSV converter — it shares no code with `ckl_convert.py`
+and can be copied to a host as a single file.
+
+```bash
+python3 ckl2csv.py INPUT_FILE [-o PATH] [--open-only] [--severity LEVELS]
+                   [--run-as-root] [--quiet]
+```
+
+| Argument | Type | Description |
+|---|---|---|
+| `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
+| `-o, --output PATH` | path | Output CSV path (default: `<input_stem>.csv` next to the input) |
+| `--open-only` | flag | Only include findings with status `Open` or `Not_Reviewed` |
+| `--severity LEVELS` | list | Comma-separated severity filter (`high,medium,low`), override-aware |
+| `--run-as-root` | flag | Bypass the root-execution block |
+| `--quiet` | flag | Suppress `[INFO]`/`[WARNING]`; `[ERROR]` always shown |
+
+The CSV is one row per finding with the asset fields repeated on every row:
+
+```
+Host_Name, Host_IP, Vuln_Num, Severity, Rule_ID, Rule_Title, CCI_REF,
+Status, Finding_Details, Comments, Severity_Override, Severity_Justification
+```
+
+Repeated `CCI_REF` values are joined with `; `. Quoting/escaping is handled by
+the stdlib `csv` module (RFC 4180), so embedded commas, quotes, and newlines
+open correctly in Excel. `ckl_convert.py --csv` produces byte-identical output.
+
+```bash
+# One-liner for a POA&M spreadsheet of open findings
+python3 ckl2csv.py U_RHEL_8_STIG.ckl --open-only -o poam_input.csv
+```
+
+---
+
 ## Output Format Details
 
 ### JSON
@@ -194,7 +236,9 @@ A human-readable report with three sections:
 - **Vulnerability Summary** — status counts and a condensed table of
   `Vuln_Num`, `Rule_ID`, `Severity`, and `Status`
 - **Detailed Findings** — per-finding blocks with title, severity, status,
-  finding details, and comments
+  finding details, and comments. Free-text fields render as blockquotes so
+  checklist content containing `#`, `---`, or `|` cannot alter the document
+  structure
 
 ---
 
@@ -229,7 +273,7 @@ prefixed message to `stderr` and exits non-zero.
 |---|---|---|
 | File exists | `Path.exists()` | `[ERROR]` — exits |
 | Regular file | `Path.is_file()` | `[ERROR]` — exits |
-| Read permission | `os.access(R_OK)` | `[ERROR]` — exits |
+| Read permission | `os.access(R_OK)` on POSIX; direct open-probe on Windows (NTFS ACLs) | `[ERROR]` — exits |
 | Non-empty | `stat().st_size > 0` | `[ERROR]` — exits |
 | Extension | `.ckl` or `.chk` | `[WARNING]` — continues |
 
@@ -239,7 +283,7 @@ prefixed message to `stderr` and exits non-zero.
 
 | Condition | Handler |
 |---|---|
-| Malformed XML | `ET.ParseError` → `[ERROR]` message, `sys.exit(1)` |
+| Malformed XML or unreadable file | `ET.ParseError` / `OSError` → `[ERROR]` message, `sys.exit(1)` |
 | No `<VULN>` nodes found | `[WARNING]` — output files still written |
 | No `<ASSET>` node found | `[WARNING]` — output files still written |
 | Write permission denied | `PermissionError` → `[ERROR]` message per file |
@@ -252,8 +296,8 @@ prefixed message to `stderr` and exits non-zero.
 
 | Code | Meaning |
 |---|---|
-| `0` | All three output files written successfully |
-| `1` | Fatal error (invalid input, parse failure, JSON serialisation error) |
+| `0` | Every requested output for every input file written successfully |
+| `1` | Any failure: invalid input or option, parse failure, serialisation error, or a failed write. In batch mode, other files still convert — the exit code reports that at least one failed |
 
 ---
 
@@ -286,8 +330,10 @@ Recognised `stig_data` keys include (but are not limited to): `Vuln_Num`,
 
 ## Testing
 
-The test suite uses [pytest](https://pytest.org) and covers all critical paths
-with 57 tests across four files.
+The test suite uses [pytest](https://pytest.org) and covers all `ckl_convert.py`
+code paths with **310 tests across 12 files**. (`ckl2csv.py` is verified
+manually by design — it has no pytest file, keeping it a pure copy-and-run
+artifact.)
 
 ### Install pytest
 
@@ -298,31 +344,37 @@ pip install pytest
 ### Run the tests
 
 ```bash
-# All tests
-python3 -m pytest tests/ -v
-
-# Individual test files
-python3 -m pytest tests/test_validation.py -v   # validate_input()
-python3 -m pytest tests/test_parsing.py -v      # parse_asset(), parse_vulnerabilities(), parse_ckl()
-python3 -m pytest tests/test_root_guard.py -v   # check_root()
-python3 -m pytest tests/test_integration.py -v  # full pipeline via main()
+python3 -m pytest tests/ -q     # full suite (310 tests)
+python3 -m pytest tests/test_integration.py -v   # any single file
 ```
 
 ### Coverage areas
 
-| Test file | Function(s) covered | Tests |
+| Test file | Covers | Tests |
 |---|---|---|
-| `test_root_guard.py` | `check_root()` | 8 |
+| `test_root_guard.py` | `check_root()` incl. Windows no-op | 9 |
 | `test_validation.py` | `validate_input()` | 14 |
-| `test_parsing.py` | `parse_asset()`, `parse_vulnerabilities()`, `parse_ckl()` | 21 |
-| `test_integration.py` | `main()` end-to-end pipeline | 14 |
+| `test_parsing.py` | `parse_asset()`, `parse_vulnerabilities()`, `parse_ckl()` | 22 |
+| `test_toml.py` | TOML escaping, key quoting, `build_toml()` | 48 |
+| `test_markdown.py` | `_md_escape()`, blockquotes, `build_markdown()` | 36 |
+| `test_report.py` | `build_report()` incl. severity override | 26 |
+| `test_csv.py` | `build_csv_rows()`, `_field()`, `--csv` | 19 |
+| `test_filters.py` | `filter_vulnerabilities()`, `--open-only`/`--severity` | 14 |
+| `test_diff.py` | `build_diff()`, `--diff` | 15 |
+| `test_write_file.py` | `write_file()` error handling | 12 |
+| `test_integration.py` | `main()` end-to-end: all flags, batch, `--summary` | 59 |
+| `test_rhel8_fixture.py` | Realistic 15-finding RHEL 8 STIG fixture | 36 |
+
+Shared fixtures live in `tests/fixtures/` — including `rhel8_stig.ckl`, a
+realistic 15-finding checklist modeled on RHEL 8 STIG V1R13 with a severity
+override and repeated `CCI_REF` entries.
 
 ---
 
 ## Platform Compatibility
 
-The script is a single stdlib-only file with no compiled extensions or
-third-party packages, so it runs unmodified across platforms and Python versions:
+Both tools are single stdlib-only files with no compiled extensions or
+third-party packages, so they run unmodified across platforms and Python versions:
 
 ### RHEL / Linux
 
@@ -362,10 +414,11 @@ is used throughout, so there are no deprecation warnings on Python 3.12.
 
 ## Hardened Environment Notes
 
-- No `pip install` required — drop the single script file onto the target host.
+- No `pip install` required — drop either script onto the target host as a
+  single file.
 - Output files inherit the permissions of the directory they are written to;
   set `umask 0027` or tighter before running if the output contains sensitive
   findings.
-- The script does not write to `/tmp`, spawn subprocesses, open network
-  connections, or access any path outside the input file's directory.
+- Neither script writes to `/tmp`, spawns subprocesses, opens network
+  connections, or accesses any path outside the input/output directories.
 - Compatible with RHEL 8 system Python (3.6) through Python 3.12+.
