@@ -8,12 +8,15 @@ Two standalone Python CLI tools that convert DISA STIG Checklist files
 (`.ckl` / `.chk`, which are XML) into other formats:
 
 - **`ckl_convert.py`** — converts one or more checklists to **JSON**, **TOML**,
-  and **Markdown** at once. Opt-in extras: `--report`, `--prompt`, `--chunk`,
-  `--quiet`, `--output-dir`, `--open-only`, `--severity`, `--summary`,
-  `--diff OLD_CKL`.
+  and **Markdown** at once. Opt-in extras: `--csv`, `--report`, `--prompt`,
+  `--chunk`, `--quiet`, `--output-dir`, `--open-only`, `--severity`,
+  `--summary`, `--diff OLD_CKL`.
 - **`ckl2csv.py`** — converts a checklist to a single flat **CSV**
   (one row per finding). Supports `--open-only` / `--severity`. Fully
-  self-contained; does **not** import `ckl_convert.py`.
+  self-contained; does **not** import `ckl_convert.py`. `ckl_convert.py --csv`
+  produces byte-identical output — the CSV code (CSV_HEADER, `_field`,
+  `build_csv_rows`, `write_csv`) is duplicated in both files and must be kept
+  in sync by hand.
 
 Primary downstream use: the Markdown/`--prompt` output is fed into a Gemini
 chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
@@ -70,7 +73,7 @@ chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
 
 ## Tests
 
-- `python3 -m pytest tests/ -q` — 290 tests, all should pass.
+- `python3 -m pytest tests/ -q` — 309 tests, all should pass.
 - Only `ckl_convert.py` is covered by the suite; `ckl2csv.py` is verified
   manually (no pytest file by design).
 - Shared fixtures live in `tests/fixtures/`: `valid.ckl` (3 findings),

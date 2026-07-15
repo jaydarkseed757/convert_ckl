@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
 import re
@@ -636,6 +637,70 @@ def build_diff(old_data: dict, new_data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# CSV generation (kept in sync with the standalone ckl2csv.py by hand)
+# ---------------------------------------------------------------------------
+
+CSV_HEADER = [
+    "Host_Name", "Host_IP",
+    "Vuln_Num", "Severity", "Rule_ID", "Rule_Title", "CCI_REF",
+    "Status", "Finding_Details", "Comments",
+    "Severity_Override", "Severity_Justification",
+]
+
+
+def _field(value) -> str:
+    """Join list-valued STIG_DATA attributes (e.g. repeated CCI_REF); pass through strings."""
+    if isinstance(value, list):
+        return "; ".join(str(v) for v in value)
+    return str(value) if value is not None else ""
+
+
+def build_csv_rows(data: dict):
+    """Return (header, rows) — one row per vulnerability, asset fields repeated."""
+    asset    = data["asset"]
+    host     = asset.get("HOST_NAME") or asset.get("ASSET_NAME") or ""
+    host_ip  = asset.get("HOST_IP", "")
+
+    rows = []
+    for vuln in data["vulnerabilities"]:
+        sd = vuln.get("stig_data", {})
+        rows.append([
+            host,
+            host_ip,
+            _field(sd.get("Vuln_Num", "")),
+            _field(sd.get("Severity", "")),
+            _field(sd.get("Rule_ID", "")),
+            _field(sd.get("Rule_Title", "")),
+            _field(sd.get("CCI_REF", "")),
+            _field(vuln.get("STATUS", "")),
+            _field(vuln.get("FINDING_DETAILS", "")),
+            _field(vuln.get("COMMENTS", "")),
+            _field(vuln.get("SEVERITY_OVERRIDE", "")),
+            _field(vuln.get("SEVERITY_JUSTIFICATION", "")),
+        ])
+
+    return CSV_HEADER, rows
+
+
+def write_csv(path: Path, header: list, rows: list) -> bool:
+    """Write header + rows to path as CSV. Returns True on success."""
+    try:
+        # newline="" per the csv module docs: avoids extra blank lines on Windows.
+        with path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(rows)
+        _info(f"[OK] CSV written → {path}")
+        return True
+    except PermissionError as exc:
+        print(f"[ERROR] Permission denied writing CSV to '{path}': {exc}", file=sys.stderr)
+        return False
+    except IOError as exc:
+        print(f"[ERROR] I/O error writing CSV to '{path}': {exc}", file=sys.stderr)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # GenAI prompt wrapper
 # ---------------------------------------------------------------------------
 
@@ -795,6 +860,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--csv",
+        action="store_true",
+        default=False,
+        help="Also write a flat <name>.csv, one row per finding "
+             "(same format as the standalone ckl2csv.py).",
+    )
+    parser.add_argument(
         "--report",
         action="store_true",
         default=False,
@@ -918,6 +990,12 @@ def convert_one(input_path: Path, args, severities: set = None,
 
     outputs_ok = ok_json and ok_toml and ok_md
 
+    # --- CSV (opt-in) ----------------------------------------------------------
+    if args.csv:
+        header, rows = build_csv_rows(data)
+        ok_csv = write_csv(output_dir / f"{stem}.csv", header, rows)
+        outputs_ok = outputs_ok and ok_csv
+
     # --- Report (opt-in) -----------------------------------------------------
     if args.report:
         report_path = output_dir / f"report_{stem}.txt"
@@ -986,10 +1064,10 @@ def main() -> int:
         print("[ERROR] --diff supports a single INPUT_FILE only.", file=sys.stderr)
         return 1
 
-    if args.summary and (args.report or args.prompt is not None
+    if args.summary and (args.csv or args.report or args.prompt is not None
                          or args.chunk is not None or args.output_dir or args.diff):
         _warn("[WARNING] --summary writes no files; "
-              "--report/--prompt/--chunk/--output-dir/--diff are ignored.")
+              "--csv/--report/--prompt/--chunk/--output-dir/--diff are ignored.")
 
     # 3. Parse the old checklist once for --diff (skipped in summary mode).
     old_data = None

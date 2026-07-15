@@ -20,7 +20,7 @@ external dependencies — stdlib only.
 ## Usage
 
 ```bash
-python3 ckl_convert.py INPUT_FILE [INPUT_FILE ...] [--run-as-root] [--report]
+python3 ckl_convert.py INPUT_FILE [INPUT_FILE ...] [--run-as-root] [--csv] [--report]
                        [--prompt [STYLE]] [--chunk N] [--quiet] [--output-dir DIR]
                        [--open-only] [--severity LEVELS] [--summary] [--diff OLD_CKL]
 ```
@@ -35,6 +35,7 @@ python3 ckl_convert.py INPUT_FILE [INPUT_FILE ...] [--run-as-root] [--report]
 | `--severity LEVELS` | list | Comma-separated severity filter (`high,medium,low`). Uses the *effective* severity: `SEVERITY_OVERRIDE` when set, else `Severity` |
 | `--summary` | flag | Print the processing report to stdout and write **no files**. Respects the filters; other output flags are ignored with a warning |
 | `--diff OLD_CKL` | path | Compare against an older scan and also write `diff_<name>.md` (newly open / remediated / status changed / added / removed). Always uses unfiltered data; single `INPUT_FILE` only |
+| `--csv` | flag | Also write a flat `<name>.csv`, one row per finding — same format as the standalone `ckl2csv.py` |
 | `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats. The severity breakdown honours `SEVERITY_OVERRIDE` (overridden findings count under their overridden CAT level, annotated `[N overridden]`) |
 | `--prompt [STYLE]` | optional | Also write a `prompt_<name>.md` with a genAI system prompt prepended to the Markdown, ready to paste into a chatbot. `STYLE` defaults to `analyst` if omitted (see table below) |
 | `--chunk N` | integer | Also split the Markdown into files of N findings each (`<name>_chunk_001.md`, …) — useful for large STIGs that exceed an LLM's context window |
@@ -77,6 +78,9 @@ python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --chunk 20
 # Write all output to a specific directory, suppress informational output
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --output-dir /tmp/stig_out --quiet
 
+# Also produce an Excel-ready CSV alongside JSON/TOML/MD
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --csv
+
 # Quick triage: stats to stdout, no files written
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --summary --open-only
 
@@ -107,6 +111,7 @@ U_RHEL_8_STIG.md    ← asset list + summary table + detailed findings
 Optional outputs (each flag is additive — the three core files are always written):
 
 ```
+U_RHEL_8_STIG.csv             ← --csv      : one row per finding (ckl2csv.py format)
 report_U_RHEL_8_STIG.txt      ← --report   : Status / Severity breakdown (counts + %)
 prompt_U_RHEL_8_STIG.md       ← --prompt   : genAI system prompt + full Markdown
 U_RHEL_8_STIG_chunk_001.md    ← --chunk N  : findings 1–N
