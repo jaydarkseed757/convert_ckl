@@ -466,3 +466,96 @@ def test_integration_output_dir_with_chunk(ckl_module, tmp_path):
     _run_main(ckl_module, f, ["--output-dir", str(out), "--chunk", "2"])
     assert (out / "valid_chunk_001.md").exists()
     assert (out / "valid_chunk_002.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# Batch input (multiple INPUT_FILEs)
+# ---------------------------------------------------------------------------
+
+def test_integration_batch_converts_all_inputs(ckl_module, tmp_path):
+    f1 = _copy_fixture("valid.ckl", tmp_path)
+    f2 = _copy_fixture("minimal.ckl", tmp_path)
+    result = _run_main(ckl_module, f1, [str(f2)])
+    assert result == 0
+    assert (tmp_path / "valid.json").exists()
+    assert (tmp_path / "minimal.json").exists()
+
+
+def test_integration_batch_single_file_unchanged(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    assert _run_main(ckl_module, f) == 0
+    assert (tmp_path / "valid.json").exists()
+
+
+def test_integration_batch_continues_after_bad_file(ckl_module, tmp_path, capsys):
+    bad = tmp_path / "missing.ckl"           # never created
+    good = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, bad, [str(good)])
+    assert result == 1                        # one file failed
+    assert (tmp_path / "valid.json").exists() # but the good one converted
+    err = capsys.readouterr().err
+    assert "1 of 2 file(s) failed" in err
+
+
+def test_integration_batch_output_dir_collects_everything(ckl_module, tmp_path):
+    f1 = _copy_fixture("valid.ckl", tmp_path)
+    f2 = _copy_fixture("minimal.ckl", tmp_path)
+    out = tmp_path / "all"
+    _run_main(ckl_module, f1, [str(f2), "--output-dir", str(out)])
+    assert (out / "valid.md").exists()
+    assert (out / "minimal.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# --summary flag
+# ---------------------------------------------------------------------------
+
+def test_integration_summary_prints_report_to_stdout(ckl_module, tmp_path, capsys):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    result = _run_main(ckl_module, f, ["--summary"])
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "STIG Checklist Processing Report" in out
+    assert "Status Breakdown" in out
+
+
+def test_integration_summary_writes_no_files(ckl_module, tmp_path):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--summary"])
+    assert not (tmp_path / "valid.json").exists()
+    assert not (tmp_path / "valid.toml").exists()
+    assert not (tmp_path / "valid.md").exists()
+
+
+def test_integration_summary_prints_even_with_quiet(ckl_module, tmp_path, capsys):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--summary", "--quiet"])
+    out = capsys.readouterr().out
+    assert "STIG Checklist Processing Report" in out
+    assert "[INFO]" not in out               # chrome suppressed, report kept
+
+
+def test_integration_summary_respects_filters(ckl_module, tmp_path, capsys):
+    f = _copy_fixture("rhel8_stig.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--summary", "--open-only", "--quiet"])
+    assert "Total findings : 8" in capsys.readouterr().out
+
+
+def test_integration_summary_warns_when_output_flags_combined(ckl_module, tmp_path, capsys):
+    f = _copy_fixture("valid.ckl", tmp_path)
+    _run_main(ckl_module, f, ["--summary", "--report"])
+    assert "--summary writes no files" in capsys.readouterr().err
+    assert not (tmp_path / "report_valid.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# --chunk on an empty checklist (B3)
+# ---------------------------------------------------------------------------
+
+def test_integration_chunk_empty_checklist_writes_no_chunks(ckl_module, tmp_path):
+    no_vulns = "<CHECKLIST><ASSET><HOST_NAME>box</HOST_NAME></ASSET></CHECKLIST>"
+    f = tmp_path / "empty_vulns.ckl"
+    f.write_text(no_vulns, encoding="utf-8")
+    result = _run_main(ckl_module, f, ["--chunk", "5"])
+    assert result == 0
+    assert list(tmp_path.glob("*_chunk_*.md")) == []

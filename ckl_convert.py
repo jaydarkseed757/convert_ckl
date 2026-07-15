@@ -327,6 +327,33 @@ def _count_statuses(vulns: list) -> dict:
     return counts
 
 
+# Statuses that represent findings still needing action.
+OPEN_STATUSES = ("Open", "Not_Reviewed")
+
+
+def _effective_severity(vuln: dict) -> str:
+    """Severity used for filtering/reporting: the override wins when set."""
+    return ((vuln.get("SEVERITY_OVERRIDE") or
+             vuln.get("stig_data", {}).get("Severity") or "").strip().lower())
+
+
+def filter_vulnerabilities(vulns: list, open_only: bool = False,
+                           severities: set = None) -> list:
+    """
+    Return the subset of vulns matching the active filters.
+
+    open_only  — keep only findings whose STATUS is in OPEN_STATUSES.
+    severities — keep only findings whose effective severity (override-aware)
+                 is in the given set of lowercase levels, e.g. {"high", "medium"}.
+    """
+    out = vulns
+    if open_only:
+        out = [v for v in out if v.get("STATUS") in OPEN_STATUSES]
+    if severities:
+        out = [v for v in out if _effective_severity(v) in severities]
+    return out
+
+
 def build_markdown(data: dict) -> str:
     """
     Build a Markdown document with:
@@ -490,7 +517,9 @@ def build_report(data: dict) -> str:
             raw = override or original
             label = _SEVERITY_LABELS.get(raw, f"Other ({raw})" if raw else "Unspecified")
             sev_counts[label] = sev_counts.get(label, 0) + 1
-            if override:
+            # Only an override that actually changes the category counts as
+            # overridden — some exporters echo Severity into SEVERITY_OVERRIDE.
+            if override and override != original:
                 override_counts[label] = override_counts.get(label, 0) + 1
 
         def _sev_line(label: str, count: int) -> str:
@@ -511,6 +540,97 @@ def build_report(data: dict) -> str:
                                    key=lambda kv: (-kv[1], kv[0])):
             lines.append(_sev_line(label, count))
     lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Checklist diff (remediation delta between two scans)
+# ---------------------------------------------------------------------------
+
+def _vuln_key(vuln: dict, index: int) -> str:
+    """Stable matching key for a finding: Vuln_Num, else Rule_ID, else position."""
+    sd = vuln.get("stig_data", {})
+    return sd.get("Vuln_Num") or sd.get("Rule_ID") or f"(unkeyed #{index})"
+
+
+def _diff_row(vuln: dict, old_status: str, new_status: str) -> str:
+    sd = vuln.get("stig_data", {})
+    return (f"| {_md_escape(sd.get('Vuln_Num', ''))} "
+            f"| {_md_escape(sd.get('Rule_Title', ''))} "
+            f"| {_md_escape(_effective_severity(vuln))} "
+            f"| {_md_escape(old_status)} | {_md_escape(new_status)} |")
+
+
+def build_diff(old_data: dict, new_data: dict) -> str:
+    """
+    Build a Markdown delta report between two scans of the same target.
+
+    Findings are matched by Vuln_Num (falling back to Rule_ID). Sections:
+      Newly Open     — open in NEW; was closed in OLD or absent from OLD
+      Remediated     — closed in NEW; was open in OLD
+      Status Changed — present in both with any other status transition
+      Added          — only in NEW (and not open, else it is Newly Open)
+      Removed        — only in OLD
+    Always runs on unfiltered data so remediated findings can't be hidden.
+    """
+    old_by_key = {_vuln_key(v, i): v for i, v in enumerate(old_data["vulnerabilities"])}
+    new_by_key = {_vuln_key(v, i): v for i, v in enumerate(new_data["vulnerabilities"])}
+
+    newly_open, remediated, changed, added, removed = [], [], [], [], []
+    unchanged = 0
+
+    for key, new_v in new_by_key.items():
+        new_status = new_v.get("STATUS", "")
+        old_v = old_by_key.get(key)
+        if old_v is None:
+            if new_status in OPEN_STATUSES:
+                newly_open.append(_diff_row(new_v, "(not in old file)", new_status))
+            else:
+                added.append(_diff_row(new_v, "(not in old file)", new_status))
+            continue
+        old_status = old_v.get("STATUS", "")
+        if old_status == new_status:
+            unchanged += 1
+        elif new_status in OPEN_STATUSES and old_status not in OPEN_STATUSES:
+            newly_open.append(_diff_row(new_v, old_status, new_status))
+        elif old_status in OPEN_STATUSES and new_status not in OPEN_STATUSES:
+            remediated.append(_diff_row(new_v, old_status, new_status))
+        else:
+            changed.append(_diff_row(new_v, old_status, new_status))
+
+    for key, old_v in old_by_key.items():
+        if key not in new_by_key:
+            removed.append(_diff_row(old_v, old_v.get("STATUS", ""), "(not in new file)"))
+
+    lines: list = []
+    lines.append(f"# STIG Checklist Diff — {_md_escape(new_data['source_file'])} "
+                 f"vs {_md_escape(old_data['source_file'])}")
+    lines.append("")
+    lines.append(f"**Old:** `{old_data['source_file']}`  ")
+    lines.append(f"**New:** `{new_data['source_file']}`  ")
+    lines.append("")
+    lines.append(f"**Summary:** {len(newly_open)} newly open, {len(remediated)} remediated, "
+                 f"{len(changed)} status changed, {len(added)} added, "
+                 f"{len(removed)} removed, {unchanged} unchanged")
+    lines.append("")
+
+    table_header = ("| Vuln_Num | Rule_Title | Severity | Old Status | New Status |",
+                    "|----------|------------|----------|------------|------------|")
+
+    for title, rows in (("Newly Open", newly_open),
+                        ("Remediated", remediated),
+                        ("Status Changed", changed),
+                        ("Added", added),
+                        ("Removed", removed)):
+        lines.append(f"## {title} ({len(rows)})")
+        lines.append("")
+        if rows:
+            lines.extend(table_header)
+            lines.extend(rows)
+        else:
+            lines.append("_None._")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -632,7 +752,38 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "input_file",
         metavar="INPUT_FILE",
-        help="Path to the STIG Checklist file (.ckl or .chk).",
+        nargs="+",
+        help="Path(s) to STIG Checklist file(s) (.ckl or .chk). "
+             "Multiple files are converted one after another.",
+    )
+    parser.add_argument(
+        "--open-only",
+        dest="open_only",
+        action="store_true",
+        default=False,
+        help="Only include findings with status Open or Not_Reviewed in all outputs.",
+    )
+    parser.add_argument(
+        "--severity",
+        metavar="LEVELS",
+        default=None,
+        help="Comma-separated severity filter (high,medium,low). Uses the "
+             "effective severity: SEVERITY_OVERRIDE when set, else Severity.",
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        default=False,
+        help="Print the processing report to stdout and write NO files. "
+             "Respects --open-only/--severity; other output flags are ignored.",
+    )
+    parser.add_argument(
+        "--diff",
+        metavar="OLD_CKL",
+        default=None,
+        help="Compare against an older checklist and also write diff_<name>.md "
+             "(newly open / remediated / status changed / added / removed). "
+             "The diff always uses unfiltered data. Single INPUT_FILE only.",
     )
     parser.add_argument(
         "--run-as-root",
@@ -690,31 +841,15 @@ def build_parser() -> argparse.ArgumentParser:
 # Main
 # ---------------------------------------------------------------------------
 
-def main() -> int:
-    parser = build_parser()
-    args   = parser.parse_args()
-
-    # Apply quiet flag before any output
-    global _quiet
-    _quiet = args.quiet
-
-    # Reject bad option values before any parsing or file writing
-    if args.chunk is not None and args.chunk <= 0:
-        print("[ERROR] --chunk value must be a positive integer.", file=sys.stderr)
-        return 1
-
-    # 1. Root guard
-    check_root(args.run_as_root)
-
-    # 2. Validate input
-    input_path = validate_input(args.input_file)
-
+def convert_one(input_path: Path, args, severities: set = None,
+                old_data: dict = None) -> int:
+    """Run the full conversion pipeline for a single input file. Returns 0 or 1."""
     _info(f"[INFO] Parsing: {input_path}")
 
-    # 3. Parse XML
+    # 1. Parse XML
     data = parse_ckl(input_path)
 
-    # 4. Verify extraction
+    # 2. Verify extraction
     if not data["vulnerabilities"]:
         _warn(
             "[WARNING] No <VULN> nodes were found in the checklist. "
@@ -724,7 +859,33 @@ def main() -> int:
     if not data["asset"]:
         _warn("[WARNING] No <ASSET> node was found in the checklist.")
 
-    # 5. Derive output paths
+    # 3. Diff against the old scan — always on unfiltered data, so an active
+    #    filter can never hide a remediated or newly-open finding.
+    diff_content = build_diff(old_data, data) if old_data is not None else None
+
+    # 4. Apply finding filters (affect every subsequent output)
+    if args.open_only or severities:
+        before = len(data["vulnerabilities"])
+        data["vulnerabilities"] = filter_vulnerabilities(
+            data["vulnerabilities"], args.open_only, severities)
+        after = len(data["vulnerabilities"])
+        active = []
+        if args.open_only:
+            active.append("open-only")
+        if severities:
+            active.append("severity=" + ",".join(sorted(severities)))
+        _info(f"[INFO] Filters applied ({'; '.join(active)}): "
+              f"{before} findings -> {after}")
+        if before and not after:
+            _warn("[WARNING] All findings were excluded by the active filters. "
+                  "Output files will contain no vulnerability data.")
+
+    # 5. Summary mode: print the report and write nothing.
+    if args.summary:
+        print(build_report(data))
+        return 0
+
+    # 6. Derive output paths
     stem = input_path.stem
     if args.output_dir:
         output_dir = Path(args.output_dir)
@@ -736,7 +897,7 @@ def main() -> int:
     toml_path = output_dir / f"{stem}.toml"
     md_path   = output_dir / f"{stem}.md"
 
-    # 6. Serialise and write
+    # 7. Serialise and write
 
     # --- JSON ----------------------------------------------------------------
     try:
@@ -774,7 +935,8 @@ def main() -> int:
     if args.chunk is not None:
         n      = args.chunk
         vulns  = data["vulnerabilities"]
-        total  = max(1, (len(vulns) + n - 1) // n)
+        # Nothing to split → no chunk files (the no-VULN warning already fired).
+        total  = (len(vulns) + n - 1) // n
         for i in range(total):
             chunk_data    = {**data, "vulnerabilities": vulns[i * n:(i + 1) * n]}
             chunk_content = f"<!-- Chunk {i + 1} of {total} -->\n\n" + build_markdown(chunk_data)
@@ -782,12 +944,78 @@ def main() -> int:
             ok_c = write_file(chunk_path, chunk_content, f"Chunk {i + 1}/{total}")
             outputs_ok = outputs_ok and ok_c
 
+    # --- Diff (opt-in) ---------------------------------------------------------
+    if diff_content is not None:
+        diff_path = output_dir / f"diff_{stem}.md"
+        ok_diff = write_file(diff_path, diff_content, "Diff")
+        outputs_ok = outputs_ok and ok_diff
+
     if outputs_ok:
         _info("[INFO] Conversion complete.")
         return 0
 
     print("[ERROR] One or more output files could not be written.", file=sys.stderr)
     return 1
+
+
+def main() -> int:
+    parser = build_parser()
+    args   = parser.parse_args()
+
+    # Apply quiet flag before any output
+    global _quiet
+    _quiet = args.quiet
+
+    # 1. Root guard (always first, per the documented security posture)
+    check_root(args.run_as_root)
+
+    # 2. Reject bad option values before any parsing or file writing
+    if args.chunk is not None and args.chunk <= 0:
+        print("[ERROR] --chunk value must be a positive integer.", file=sys.stderr)
+        return 1
+
+    severities = None
+    if args.severity:
+        severities = {s.strip().lower() for s in args.severity.split(",") if s.strip()}
+        if not severities or severities - {"high", "medium", "low"}:
+            print("[ERROR] --severity must be a comma-separated list of: "
+                  "high, medium, low", file=sys.stderr)
+            return 1
+
+    if args.diff and len(args.input_file) > 1:
+        print("[ERROR] --diff supports a single INPUT_FILE only.", file=sys.stderr)
+        return 1
+
+    if args.summary and (args.report or args.prompt is not None
+                         or args.chunk is not None or args.output_dir or args.diff):
+        _warn("[WARNING] --summary writes no files; "
+              "--report/--prompt/--chunk/--output-dir/--diff are ignored.")
+
+    # 3. Parse the old checklist once for --diff (skipped in summary mode).
+    old_data = None
+    if args.diff and not args.summary:
+        old_path = validate_input(args.diff)
+        old_data = parse_ckl(old_path)
+
+    # 4. Convert each input; keep going when one fails so a batch completes.
+    failed = []
+    for raw_path in args.input_file:
+        try:
+            input_path = validate_input(raw_path)
+            rc = convert_one(input_path, args, severities, old_data)
+        except SystemExit as exc:
+            # validate_input()/parse_ckl() exit directly on a bad file; in a
+            # batch we record the failure and continue with the next file.
+            rc = exc.code if isinstance(exc.code, int) else 1
+        if rc != 0:
+            failed.append(raw_path)
+
+    if failed:
+        if len(args.input_file) > 1:
+            print(f"[ERROR] {len(failed)} of {len(args.input_file)} file(s) failed: "
+                  + ", ".join(failed), file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

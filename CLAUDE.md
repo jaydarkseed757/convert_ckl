@@ -7,12 +7,13 @@ Guidance for working in this repository.
 Two standalone Python CLI tools that convert DISA STIG Checklist files
 (`.ckl` / `.chk`, which are XML) into other formats:
 
-- **`ckl_convert.py`** — converts a checklist to **JSON**, **TOML**, and
-  **Markdown** at once. Has opt-in extras: `--report`, `--prompt`, `--chunk`,
-  `--quiet`, `--output-dir`.
+- **`ckl_convert.py`** — converts one or more checklists to **JSON**, **TOML**,
+  and **Markdown** at once. Opt-in extras: `--report`, `--prompt`, `--chunk`,
+  `--quiet`, `--output-dir`, `--open-only`, `--severity`, `--summary`,
+  `--diff OLD_CKL`.
 - **`ckl2csv.py`** — converts a checklist to a single flat **CSV**
-  (one row per finding). Fully self-contained; does **not** import
-  `ckl_convert.py`.
+  (one row per finding). Supports `--open-only` / `--severity`. Fully
+  self-contained; does **not** import `ckl_convert.py`.
 
 Primary downstream use: the Markdown/`--prompt` output is fed into a Gemini
 chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
@@ -45,8 +46,21 @@ chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
 - **Repeated `STIG_DATA` attributes** (commonly `CCI_REF`) are collected into a
   **list**, never overwritten. Downstream code must handle str-or-list:
   JSON/TOML emit arrays; Markdown/CSV join them (`, ` and `; ` respectively).
-- **`SEVERITY_OVERRIDE`** takes precedence over raw `Severity` in
-  `build_report()`'s severity breakdown, annotated `[N overridden]`.
+- **`SEVERITY_OVERRIDE`** takes precedence over raw `Severity` everywhere an
+  "effective severity" is needed (`build_report()` breakdown, `--severity`
+  filtering). The report's `[N overridden]` annotation appears only when the
+  override actually differs from the original (some exporters echo Severity
+  into SEVERITY_OVERRIDE).
+- **Filters** (`--open-only`, `--severity`) apply to every written output and
+  emit an `[INFO] Filters applied ...: N findings -> M` provenance line.
+  Exception: `--diff` always compares unfiltered data — a filter must never
+  hide a remediated or newly-open finding from the delta.
+- **Batch input** (`ckl_convert.py` only): multiple INPUT_FILEs are converted
+  independently; a failed file doesn't stop the rest (main() catches the
+  SystemExit from validate_input/parse_ckl per file). Exit 0 only when every
+  file succeeded. `--diff` requires exactly one INPUT_FILE.
+- **`--summary`** prints `build_report()` to stdout and writes nothing; the
+  report prints even under `--quiet` (it is the requested output, not chrome).
 - Output files are written next to the input (same stem) unless redirected
   (`--output-dir` for `ckl_convert.py`, `-o` for `ckl2csv.py`).
 - Free-text fields (`FINDING_DETAILS`, `COMMENTS`) render as Markdown
@@ -56,7 +70,7 @@ chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
 
 ## Tests
 
-- `python3 -m pytest tests/ -q` — 250 tests, all should pass.
+- `python3 -m pytest tests/ -q` — 290 tests, all should pass.
 - Only `ckl_convert.py` is covered by the suite; `ckl2csv.py` is verified
   manually (no pytest file by design).
 - Shared fixtures live in `tests/fixtures/`: `valid.ckl` (3 findings),

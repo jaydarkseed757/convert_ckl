@@ -191,6 +191,37 @@ def parse_ckl(filepath: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Finding filters
+# ---------------------------------------------------------------------------
+
+# Statuses that represent findings still needing action.
+OPEN_STATUSES = ("Open", "Not_Reviewed")
+
+
+def _effective_severity(vuln: dict) -> str:
+    """Severity used for filtering: the override wins when set."""
+    return ((vuln.get("SEVERITY_OVERRIDE") or
+             vuln.get("stig_data", {}).get("Severity") or "").strip().lower())
+
+
+def filter_vulnerabilities(vulns: list, open_only: bool = False,
+                           severities: set = None) -> list:
+    """
+    Return the subset of vulns matching the active filters.
+
+    open_only  — keep only findings whose STATUS is in OPEN_STATUSES.
+    severities — keep only findings whose effective severity (override-aware)
+                 is in the given set of lowercase levels, e.g. {"high", "medium"}.
+    """
+    out = vulns
+    if open_only:
+        out = [v for v in out if v.get("STATUS") in OPEN_STATUSES]
+    if severities:
+        out = [v for v in out if _effective_severity(v) in severities]
+    return out
+
+
+# ---------------------------------------------------------------------------
 # CSV generation
 # ---------------------------------------------------------------------------
 
@@ -273,6 +304,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output CSV path. Defaults to <input_stem>.csv next to the input file.",
     )
     parser.add_argument(
+        "--open-only",
+        dest="open_only",
+        action="store_true",
+        default=False,
+        help="Only include findings with status Open or Not_Reviewed.",
+    )
+    parser.add_argument(
+        "--severity",
+        metavar="LEVELS",
+        default=None,
+        help="Comma-separated severity filter (high,medium,low). Uses the "
+             "effective severity: SEVERITY_OVERRIDE when set, else Severity.",
+    )
+    parser.add_argument(
         "--run-as-root",
         action="store_true",
         default=False,
@@ -304,15 +349,24 @@ def main() -> int:
     # 1. Root guard
     check_root(args.run_as_root)
 
-    # 2. Validate input
+    # 2. Reject bad option values before any parsing or file writing
+    severities = None
+    if args.severity:
+        severities = {s.strip().lower() for s in args.severity.split(",") if s.strip()}
+        if not severities or severities - {"high", "medium", "low"}:
+            print("[ERROR] --severity must be a comma-separated list of: "
+                  "high, medium, low", file=sys.stderr)
+            return 1
+
+    # 3. Validate input
     input_path = validate_input(args.input_file)
 
     _info(f"[INFO] Parsing: {input_path}")
 
-    # 3. Parse XML
+    # 4. Parse XML
     data = parse_ckl(input_path)
 
-    # 4. Verify extraction
+    # 5. Verify extraction
     if not data["vulnerabilities"]:
         _warn(
             "[WARNING] No <VULN> nodes were found in the checklist. "
@@ -322,10 +376,27 @@ def main() -> int:
     if not data["asset"]:
         _warn("[WARNING] No <ASSET> node was found in the checklist.")
 
-    # 5. Derive output path
+    # 6. Apply finding filters
+    if args.open_only or severities:
+        before = len(data["vulnerabilities"])
+        data["vulnerabilities"] = filter_vulnerabilities(
+            data["vulnerabilities"], args.open_only, severities)
+        after = len(data["vulnerabilities"])
+        active = []
+        if args.open_only:
+            active.append("open-only")
+        if severities:
+            active.append("severity=" + ",".join(sorted(severities)))
+        _info(f"[INFO] Filters applied ({'; '.join(active)}): "
+              f"{before} findings -> {after}")
+        if before and not after:
+            _warn("[WARNING] All findings were excluded by the active filters. "
+                  "The CSV will contain a header row only.")
+
+    # 7. Derive output path
     output_path = Path(args.output) if args.output else input_path.with_suffix(".csv")
 
-    # 6. Build and write CSV
+    # 8. Build and write CSV
     header, rows = build_csv_rows(data)
     if write_csv(output_path, header, rows):
         _info("[INFO] Conversion complete.")

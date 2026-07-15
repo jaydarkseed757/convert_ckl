@@ -20,16 +20,21 @@ external dependencies — stdlib only.
 ## Usage
 
 ```bash
-python3 ckl_convert.py INPUT_FILE [--run-as-root] [--report] [--prompt]
-                       [--chunk N] [--quiet] [--output-dir DIR]
+python3 ckl_convert.py INPUT_FILE [INPUT_FILE ...] [--run-as-root] [--report]
+                       [--prompt [STYLE]] [--chunk N] [--quiet] [--output-dir DIR]
+                       [--open-only] [--severity LEVELS] [--summary] [--diff OLD_CKL]
 ```
 
 ### Arguments
 
 | Argument | Type | Description |
 |---|---|---|
-| `INPUT_FILE` | positional | Path to the `.ckl` or `.chk` checklist file |
+| `INPUT_FILE ...` | positional | One or more `.ckl` / `.chk` checklist files. Each is converted independently; a bad file doesn't stop the rest of the batch (exit code is 0 only if every file succeeded) |
 | `--run-as-root` | flag | Bypass the root-execution block (see [Security](#security)) |
+| `--open-only` | flag | Only include findings with status `Open` or `Not_Reviewed` in all outputs |
+| `--severity LEVELS` | list | Comma-separated severity filter (`high,medium,low`). Uses the *effective* severity: `SEVERITY_OVERRIDE` when set, else `Severity` |
+| `--summary` | flag | Print the processing report to stdout and write **no files**. Respects the filters; other output flags are ignored with a warning |
+| `--diff OLD_CKL` | path | Compare against an older scan and also write `diff_<name>.md` (newly open / remediated / status changed / added / removed). Always uses unfiltered data; single `INPUT_FILE` only |
 | `--report` | flag | Also write a plain-text `report_<name>.txt` summary of processing stats. The severity breakdown honours `SEVERITY_OVERRIDE` (overridden findings count under their overridden CAT level, annotated `[N overridden]`) |
 | `--prompt [STYLE]` | optional | Also write a `prompt_<name>.md` with a genAI system prompt prepended to the Markdown, ready to paste into a chatbot. `STYLE` defaults to `analyst` if omitted (see table below) |
 | `--chunk N` | integer | Also split the Markdown into files of N findings each (`<name>_chunk_001.md`, …) — useful for large STIGs that exceed an LLM's context window |
@@ -72,6 +77,18 @@ python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --chunk 20
 # Write all output to a specific directory, suppress informational output
 python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --output-dir /tmp/stig_out --quiet
 
+# Quick triage: stats to stdout, no files written
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --summary --open-only
+
+# Only open CAT I / CAT II findings in every output
+python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --open-only --severity high,medium
+
+# Remediation progress between two scans
+python3 ckl_convert.py todays_scan.ckl --diff last_months_scan.ckl
+
+# Convert a whole batch into one directory
+python3 ckl_convert.py host1.ckl host2.ckl host3.ckl --output-dir ./fleet
+
 # Override root block — document your reason in change control
 sudo python3 ckl_convert.py /path/to/U_RHEL_8_STIG.ckl --run-as-root
 ```
@@ -94,7 +111,14 @@ report_U_RHEL_8_STIG.txt      ← --report   : Status / Severity breakdown (coun
 prompt_U_RHEL_8_STIG.md       ← --prompt   : genAI system prompt + full Markdown
 U_RHEL_8_STIG_chunk_001.md    ← --chunk N  : findings 1–N
 U_RHEL_8_STIG_chunk_002.md                   findings N+1–2N  … etc.
+diff_U_RHEL_8_STIG.md         ← --diff     : delta vs an older scan
 ```
+
+With `--summary`, nothing is written at all — the report prints to stdout.
+When `--open-only` / `--severity` are active, **all** written outputs reflect
+the filtered finding set (an `[INFO] Filters applied` line records the
+before/after counts); only `--diff` ignores filters, so remediated findings
+can never be hidden from the delta.
 
 ---
 
