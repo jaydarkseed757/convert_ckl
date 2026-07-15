@@ -166,7 +166,7 @@ def test_integration_write_failure_returns_one(ckl_module, tmp_path, capsys):
         return original(path, content, label)
 
     with patch("sys.argv", ["ckl_convert", str(f)]), \
-         patch("os.geteuid", return_value=1000), \
+         patch("os.geteuid", return_value=1000, create=True), \
          patch.object(ckl_module, "write_file", side_effect=failing_write):
         result = ckl_module.main()
 
@@ -177,7 +177,7 @@ def test_integration_write_failure_prints_error_to_stderr(ckl_module, tmp_path, 
     f = _copy_fixture("valid.ckl", tmp_path)
 
     with patch("sys.argv", ["ckl_convert", str(f)]), \
-         patch("os.geteuid", return_value=1000), \
+         patch("os.geteuid", return_value=1000, create=True), \
          patch.object(ckl_module, "write_file", return_value=False):
         ckl_module.main()
 
@@ -399,7 +399,7 @@ def test_integration_no_quiet_still_shows_warning(ckl_module, tmp_path, capsys):
 def test_integration_quiet_still_shows_error(ckl_module, tmp_path, capsys):
     f = _copy_fixture("valid.ckl", tmp_path)
     with patch("sys.argv", ["ckl_convert", str(f), "--quiet"]), \
-         patch("os.geteuid", return_value=1000), \
+         patch("os.geteuid", return_value=1000, create=True), \
          patch.object(ckl_module, "write_file", return_value=False):
         ckl_module.main()
     assert "[ERROR]" in capsys.readouterr().err

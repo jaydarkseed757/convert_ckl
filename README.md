@@ -215,6 +215,9 @@ attack surface. If an operational requirement genuinely demands it, pass
 `--run-as-root` and ensure the decision is captured in your change record.
 A prominent warning is still printed to `stderr` when the flag is used.
 
+The guard is Unix-specific: on Windows, where `os.geteuid()` does not exist,
+it is inert and the scripts run normally.
+
 ---
 
 ## Input Validation
@@ -337,8 +340,18 @@ third-party packages, so it runs unmodified across platforms and Python versions
 
 ### Windows
 
-Not currently supported — `os.geteuid()` is Unix-only and will raise
-`AttributeError` on Windows. Planned for a future release.
+| Windows | Status |
+|---|---|
+| Windows 10/11 (Python 3.x from python.org or the Microsoft Store) | ✅ Supported — awaiting field verification |
+
+Notes for Windows use:
+- Nothing to install beyond Python itself — both scripts are stdlib-only.
+- The root-execution guard does not apply (Windows has no UID concept);
+  run from an unprivileged account per your site policy.
+- Text outputs (`.json` / `.toml` / `.md` / report) are written with
+  platform-native CRLF line endings; the CSV is RFC 4180 on every platform.
+- The read-permission check probes the file directly on Windows, since
+  `os.access()` there does not consult NTFS ACLs.
 
 All stdlib modules used (`argparse`, `json`, `os`, `re`, `sys`,
 `xml.etree.ElementTree`, `datetime`, `pathlib`) are present in every supported

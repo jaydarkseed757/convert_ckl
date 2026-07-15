@@ -36,5 +36,5 @@ def copy_fixture(name: str, tmp_path: pathlib.Path) -> pathlib.Path:
 def run_main(ckl_module, ckl_path: pathlib.Path, extra_argv: list = None):
     """Invoke main() with sys.argv pointing at ckl_path, running as non-root."""
     argv = ["ckl_convert", str(ckl_path)] + (extra_argv or [])
-    with patch("sys.argv", argv), patch("os.geteuid", return_value=1000):
+    with patch("sys.argv", argv), patch("os.geteuid", return_value=1000, create=True):
         return ckl_module.main()

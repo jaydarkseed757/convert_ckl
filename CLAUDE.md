@@ -34,8 +34,12 @@ chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
   guard / validation / XML-parsing patterns inline rather than importing from
   `ckl_convert.py`, so it can be copied to a host as a single file. Do not
   refactor the two into a shared module.
-- **Windows is not yet supported** (deferred). `os.geteuid()` in the root guard
-  is Unix-only. Don't claim Windows support without guarding that call.
+- **Windows is supported** with three invariants to preserve: `os.geteuid()`
+  must stay behind the `hasattr(os, "geteuid")` guard in both `check_root()`s
+  (the guard is a no-op on Windows); `validate_input()` uses an open-probe on
+  `sys.platform == "win32"` because `os.access()` ignores NTFS ACLs there; and
+  every test that mocks `os.geteuid` must pass `create=True` so the patch works
+  where the attribute doesn't exist.
 
 ## Conventions
 
@@ -73,7 +77,7 @@ chatbot on genai.mil; the CSV feeds Excel/POA&M workflows.
 
 ## Tests
 
-- `python3 -m pytest tests/ -q` — 309 tests, all should pass.
+- `python3 -m pytest tests/ -q` — 310 tests, all should pass.
 - Only `ckl_convert.py` is covered by the suite; `ckl2csv.py` is verified
   manually (no pytest file by design).
 - Shared fixtures live in `tests/fixtures/`: `valid.ckl` (3 findings),
